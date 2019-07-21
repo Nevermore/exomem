@@ -17,6 +17,33 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-pub fn list_files() -> Vec<&'static str> {
-    vec!["one.txt", "two.txt"]
+use vault::Vault;
+
+pub struct Controller {
+    vault: Vault,
+}
+
+impl Controller {
+    pub fn new() -> Controller {
+        let v = Vault::open(String::from("vault.db"));
+        Controller{ vault: v }
+    }
+
+    pub fn put(&mut self, s: String) {
+        self.vault.put(s);
+    }
+
+    pub fn get(&self, s: &str) -> bool {
+        self.vault.get(s)
+    }
+
+    pub fn list_files(&self) -> &Vec<String> {
+        self.vault.list()
+    }
+}
+
+impl Drop for Controller {
+    fn drop(&mut self) {
+        self.vault.close();
+    }
 }

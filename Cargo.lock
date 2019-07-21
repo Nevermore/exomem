@@ -47,6 +47,9 @@ dependencies = [
 [[package]]
 name = "ctrl"
 version = "0.0.0"
+dependencies = [
+ "vault 0.0.0",
+]
 
 [[package]]
 name = "libc"
@@ -70,6 +73,10 @@ dependencies = [
 name = "unicode-width"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "vault"
+version = "0.0.0"
 
 [[package]]
 name = "vec_map"

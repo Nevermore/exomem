@@ -24,7 +24,7 @@ use clap::App;
 use clap::Arg;
 use clap::SubCommand;
 
-use ctrl;
+use ctrl::Controller;
 
 const APP_NAME: &str = "exomem";
 
@@ -57,26 +57,44 @@ fn main() {
         )
         .get_matches();
 
+    let mut state = State::new();
+
     match matches.subcommand() {
-        ("list", Some(_)) => list(),
-        ("get", Some(sub_m)) => get(sub_m.value_of("file").unwrap()),
-        ("put", Some(sub_m)) => put(sub_m.value_of("file").unwrap()),
+        ("list", Some(_)) => state.list(),
+        ("get", Some(sub_m)) => state.get(sub_m.value_of("file").unwrap()),
+        ("put", Some(sub_m)) => state.put(sub_m.value_of("file").unwrap()),
         ("", None) => (),
         _ => println!("Unknown command."),
     }
 }
 
-fn list() {
-    let files = ctrl::list_files();
-    for file in files {
-        println!("Have file: {}", file)
+struct State {
+    controller: Controller,
+}
+
+impl State {
+    fn new() -> State {
+        State{ controller: Controller::new() }
     }
-}
 
-fn get(filename: &str) {
-    println!("Gonna get: {}", filename)
-}
+    fn list(&self) {
+        let files = self.controller.list_files();
+        for file in files {
+            println!("Have file: {}", file);
+        }
+    }
 
-fn put(filename: &str) {
-    println!("Gonna put: {}", filename)
+    fn get(&self, filename: &str) {
+        let has = self.controller.get(filename);
+        if has {
+            println!("Indeed, we have: {}", filename);
+        } else {
+            println!("But we don't have: {}", filename)
+        }
+    }
+
+    fn put(&mut self, filename: &str) {
+        self.controller.put(String::from(filename));
+        println!("Gonna put: {}", filename);
+    }
 }
