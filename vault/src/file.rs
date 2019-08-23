@@ -17,36 +17,23 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-use std::io;
+use std::io::{Error, ErrorKind};
+use std::fs;
+use std::path::Path;
 
-use vault::Vault;
-use vault::File;
-
-pub struct Controller {
-    vault: Vault,
+pub struct File {
+	pub name: String,
+	pub data: Vec<u8>,
 }
 
-impl Controller {
-    pub fn new() -> Controller {
-        let v = Vault::open(String::from("vault.db"));
-        Controller{ vault: v }
-    }
-
-    pub fn put(&mut self, s: &str) -> Result<&File, io::Error> {
-        self.vault.put(s)
-    }
-
-    pub fn get(&self, s: &str) -> Option<&File> {
-        self.vault.get(s)
-    }
-
-    pub fn list_files(&self) -> Vec<&str> {
-        self.vault.list()
-    }
-}
-
-impl Drop for Controller {
-    fn drop(&mut self) {
-        self.vault.close();
-    }
+impl File {
+	pub fn from_os(path: &Path) -> Result<File, Error> {
+		if !path.is_file() {
+			return Err(Error::new(ErrorKind::InvalidInput, "Not a file."));
+		}
+		let name = path.file_name().ok_or(Error::new(ErrorKind::InvalidInput, "Can't determine file name."))?
+			.to_str().ok_or(Error::new(ErrorKind::InvalidInput, "Can't determine file name because of invalid Unicode."))?;
+		let data = fs::read(path)?;
+		Ok(File{ name: String::from(name), data: data })
+	}
 }

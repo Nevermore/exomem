@@ -17,11 +17,16 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+use std::io;
 use std::fs;
+use std::path::Path;
+
+mod file;
+pub use file::File;
 
 pub struct Vault {
     location: String,
-	files: Vec<String>,
+    files: Vec<File>,
 }
 
 impl Vault {
@@ -40,22 +45,26 @@ impl Vault {
     }
 
     fn serialize(&self) -> String {
-        self.files.join("\n")
+        self.files.iter().map(|f| f.name.as_str()).collect::<Vec<&str>>().join("\n")
     }
 
     fn deserialize(&mut self, data: String) {
-        self.files = data.split("\n").filter(|s| s.len() > 0).map(|s| String::from(s)).collect();
+        self.files = data.split("\n").filter(|s| s.len() > 0).map(|s| File{ name: String::from(s), data: Vec::new() }).collect();
     }
 
-	pub fn put(&mut self, name: String) {
-		self.files.push(name);
+	pub fn put(&mut self, name: &str) -> Result<&File, io::Error> {
+        let p = Path::new(name);
+        let f = File::from_os(p)?;
+        // The eventual .last().unwrap() is critically depending on the .push()
+		self.files.push(f);
+        Ok(self.files.last().unwrap())
 	}
 
-    pub fn get(&self, name: &str) -> bool {
-        self.files.iter().any(|s| s == name)
+    pub fn get(&self, name: &str) -> Option<&File> {
+        self.files.iter().find(|&f| f.name == name)
     }
 
-	pub fn list(&self) -> &Vec<String> {
-		&self.files
+	pub fn list(&self) -> Vec<&str> {
+		self.files.iter().map(|f| f.name.as_str()).collect()
 	}
 }

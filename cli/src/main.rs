@@ -85,16 +85,16 @@ impl State {
     }
 
     fn get(&self, filename: &str) {
-        let has = self.controller.get(filename);
-        if has {
-            println!("Indeed, we have: {}", filename);
-        } else {
-            println!("But we don't have: {}", filename)
+        match self.controller.get(filename) {
+            Some(f) => println!("Indeed, we have: {}", f.name),
+            None => println!("But we don't have: {}", filename),
         }
     }
 
     fn put(&mut self, filename: &str) {
-        self.controller.put(String::from(filename));
-        println!("Gonna put: {}", filename);
+        match self.controller.put(filename) {
+            Ok(f) => println!("Added: {}", f.name),
+            Err(e) => println!("Failed to add: {}", e),
+        }
     }
 }
