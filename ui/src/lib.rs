@@ -19,8 +19,8 @@
 
 use std::io;
 
-use vault::Vault;
 use vault::File;
+use vault::Vault;
 
 pub struct Controller {
     vault: Vault,
@@ -29,7 +29,7 @@ pub struct Controller {
 impl Controller {
     pub fn new() -> Controller {
         let v = Vault::open(String::from("vault.db"));
-        Controller{ vault: v }
+        Controller { vault: v }
     }
 
     pub fn put(&mut self, s: &str) -> Result<&File, io::Error> {

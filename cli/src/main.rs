@@ -24,36 +24,29 @@ use clap::App;
 use clap::Arg;
 use clap::SubCommand;
 
-use ctrl::Controller;
+use ui::Controller;
 
 const APP_NAME: &str = "exomem";
 
 fn main() {
     let matches = App::new(APP_NAME)
         .version(crate_version!())
+        .subcommand(SubCommand::with_name("list").about("List all your files."))
         .subcommand(
-            SubCommand::with_name("list")
-                .about("List all your files.")   
+            SubCommand::with_name("get").about("Get a file.").arg(
+                Arg::with_name("file")
+                    .help("The file to get.")
+                    .index(1)
+                    .required(true),
+            ),
         )
         .subcommand(
-            SubCommand::with_name("get")
-                .about("Get a file.")
-                .arg(
-                    Arg::with_name("file")
-                        .help("The file to get.")
-                        .index(1)
-                        .required(true)
-                )
-        )
-        .subcommand(
-            SubCommand::with_name("put")
-                .about("Put a file.")
-                .arg(
-                    Arg::with_name("file")
-                        .help("The file to put.")
-                        .index(1)
-                        .required(true)
-                )
+            SubCommand::with_name("put").about("Put a file.").arg(
+                Arg::with_name("file")
+                    .help("The file to put.")
+                    .index(1)
+                    .required(true),
+            ),
         )
         .get_matches();
 
@@ -74,7 +67,9 @@ struct State {
 
 impl State {
     fn new() -> State {
-        State{ controller: Controller::new() }
+        State {
+            controller: Controller::new(),
+        }
     }
 
     fn list(&self) {

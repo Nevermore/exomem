@@ -17,8 +17,8 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-use std::io;
 use std::fs;
+use std::io;
 use std::path::Path;
 
 mod file;
@@ -31,7 +31,10 @@ pub struct Vault {
 
 impl Vault {
     pub fn open(location: String) -> Vault {
-        let mut v = Vault{ location: location, files: Vec::new() };
+        let mut v = Vault {
+            location: location,
+            files: Vec::new(),
+        };
 
         if let Ok(data) = fs::read_to_string(&v.location) {
             v.deserialize(data);
@@ -45,26 +48,37 @@ impl Vault {
     }
 
     fn serialize(&self) -> String {
-        self.files.iter().map(|f| f.name.as_str()).collect::<Vec<&str>>().join("\n")
+        self.files
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect::<Vec<&str>>()
+            .join("\n")
     }
 
     fn deserialize(&mut self, data: String) {
-        self.files = data.split("\n").filter(|s| s.len() > 0).map(|s| File{ name: String::from(s), data: Vec::new() }).collect();
+        self.files = data
+            .split("\n")
+            .filter(|s| s.len() > 0)
+            .map(|s| File {
+                name: String::from(s),
+                data: Vec::new(),
+            })
+            .collect();
     }
 
-	pub fn put(&mut self, name: &str) -> Result<&File, io::Error> {
+    pub fn put(&mut self, name: &str) -> Result<&File, io::Error> {
         let p = Path::new(name);
         let f = File::from_os(p)?;
         // The eventual .last().unwrap() is critically depending on the .push()
-		self.files.push(f);
+        self.files.push(f);
         Ok(self.files.last().unwrap())
-	}
+    }
 
     pub fn get(&self, name: &str) -> Option<&File> {
         self.files.iter().find(|&f| f.name == name)
     }
 
-	pub fn list(&self) -> Vec<&str> {
-		self.files.iter().map(|f| f.name.as_str()).collect()
-	}
+    pub fn list(&self) -> Vec<&str> {
+        self.files.iter().map(|f| f.name.as_str()).collect()
+    }
 }

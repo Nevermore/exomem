@@ -1,5 +1,5 @@
 [package]
-name = "cli"
+name = "exomem"
 version = "0.0.0"
 edition = "2018"
 publish = false
@@ -12,4 +12,4 @@ path = "src/main.rs"
 [dependencies]
 clap = "2.33.0"
 
-ctrl = { path = "../ctrl" }
+ui = { package = "exomem-ui", path = "../ui" }

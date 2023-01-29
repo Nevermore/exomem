@@ -1,9 +1,9 @@
 [package]
-name = "ctrl"
+name = "exomem-ui"
 version = "0.0.0"
 edition = "2018"
 publish = false
 license = "AGPL-3.0-or-later"
 
 [dependencies]
-vault = { path = "../vault" }
+vault = { package = "exomem-vault", path = "../vault" }
