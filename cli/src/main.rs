@@ -17,47 +17,44 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#[macro_use]
-extern crate clap;
-
-use clap::App;
-use clap::Arg;
-use clap::SubCommand;
+use clap::{Parser, Subcommand};
 
 use ui::Controller;
 
 const APP_NAME: &str = "exomem";
 
+#[derive(Parser)]
+#[command(bin_name = APP_NAME, name = APP_NAME, version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// List all your files.
+    List,
+    /// Get a file.
+    Get {
+        /// The file to get.
+        name: String,
+    },
+    /// Put a file.
+    Put {
+        /// The file to put.
+        name: String,
+    },
+}
+
 fn main() {
-    let matches = App::new(APP_NAME)
-        .version(crate_version!())
-        .subcommand(SubCommand::with_name("list").about("List all your files."))
-        .subcommand(
-            SubCommand::with_name("get").about("Get a file.").arg(
-                Arg::with_name("file")
-                    .help("The file to get.")
-                    .index(1)
-                    .required(true),
-            ),
-        )
-        .subcommand(
-            SubCommand::with_name("put").about("Put a file.").arg(
-                Arg::with_name("file")
-                    .help("The file to put.")
-                    .index(1)
-                    .required(true),
-            ),
-        )
-        .get_matches();
+    let cli = Cli::parse();
 
     let mut state = State::new();
 
-    match matches.subcommand() {
-        ("list", Some(_)) => state.list(),
-        ("get", Some(sub_m)) => state.get(sub_m.value_of("file").unwrap()),
-        ("put", Some(sub_m)) => state.put(sub_m.value_of("file").unwrap()),
-        ("", None) => (),
-        _ => println!("Unknown command."),
+    match &cli.command {
+        Commands::List => state.list(),
+        Commands::Get { name } => state.get(name),
+        Commands::Put { name } => state.put(name),
     }
 }
 
@@ -75,21 +72,21 @@ impl State {
     fn list(&self) {
         let files = self.controller.list_files();
         for file in files {
-            println!("Have file: {}", file);
+            println!("Have file: {file}");
         }
     }
 
     fn get(&self, filename: &str) {
         match self.controller.get(filename) {
             Some(f) => println!("Indeed, we have: {}", f.name),
-            None => println!("But we don't have: {}", filename),
+            None => println!("But we don't have: {filename}"),
         }
     }
 
     fn put(&mut self, filename: &str) {
         match self.controller.put(filename) {
             Ok(f) => println!("Added: {}", f.name),
-            Err(e) => println!("Failed to add: {}", e),
+            Err(e) => println!("Failed to add: {e}"),
         }
     }
 }

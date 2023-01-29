@@ -45,7 +45,7 @@ impl File {
         let data = fs::read(path)?;
         Ok(File {
             name: String::from(name),
-            data: data,
+            data,
         })
     }
 }

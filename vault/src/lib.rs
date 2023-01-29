@@ -32,7 +32,7 @@ pub struct Vault {
 impl Vault {
     pub fn open(location: String) -> Vault {
         let mut v = Vault {
-            location: location,
+            location,
             files: Vec::new(),
         };
 
@@ -57,8 +57,8 @@ impl Vault {
 
     fn deserialize(&mut self, data: String) {
         self.files = data
-            .split("\n")
-            .filter(|s| s.len() > 0)
+            .split('\n')
+            .filter(|s| !s.is_empty())
             .map(|s| File {
                 name: String::from(s),
                 data: Vec::new(),
