@@ -1,5 +1,5 @@
 /*
-    Copyright 2019 OÜ Nevermore <strom@nevermore.ee>
+    Copyright 2019-2023 OÜ Nevermore <strom@nevermore.ee>
 
     This file is part of exomem.
 
