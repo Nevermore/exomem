@@ -19,8 +19,7 @@
 
 use std::io;
 
-use vault::File;
-use vault::Vault;
+use vault::{File, Vault};
 
 pub struct TaskManager<'a> {
     vault: &'a mut Vault,

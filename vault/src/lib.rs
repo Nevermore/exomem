@@ -17,73 +17,8 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-
 mod file;
+mod vault;
+
 pub use file::File;
-
-pub struct Vault {
-    path: PathBuf,
-    files: Vec<File>,
-}
-
-impl Vault {
-    pub fn open(path: impl Into<PathBuf>) -> Vault {
-        let path = path.into();
-        let mut vault = Vault {
-            path,
-            files: Vec::new(),
-        };
-        if let Ok(data) = fs::read_to_string(&vault.path) {
-            vault.deserialize(data);
-        }
-        vault
-    }
-
-    pub fn close(&self) {
-        fs::write(&self.path, self.serialize()).unwrap();
-    }
-
-    fn serialize(&self) -> String {
-        self.files
-            .iter()
-            .map(|f| f.name.as_str())
-            .collect::<Vec<&str>>()
-            .join("\n")
-    }
-
-    fn deserialize(&mut self, data: String) {
-        self.files = data
-            .split('\n')
-            .filter(|s| !s.is_empty())
-            .map(|s| File {
-                name: String::from(s),
-                data: Vec::new(),
-            })
-            .collect();
-    }
-
-    pub fn put(&mut self, name: &str) -> Result<&File, io::Error> {
-        let p = Path::new(name);
-        let f = File::from_os(p)?;
-        // The eventual .last().unwrap() is critically depending on the .push()
-        self.files.push(f);
-        Ok(self.files.last().unwrap())
-    }
-
-    pub fn get(&self, name: &str) -> Option<&File> {
-        self.files.iter().find(|&f| f.name == name)
-    }
-
-    pub fn list(&self) -> Vec<&str> {
-        self.files.iter().map(|f| f.name.as_str()).collect()
-    }
-}
-
-impl Drop for Vault {
-    fn drop(&mut self) {
-        self.close();
-    }
-}
+pub use vault::Vault;
