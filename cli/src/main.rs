@@ -19,7 +19,8 @@
 
 use clap::{Parser, Subcommand};
 
-use ui::Controller;
+use ui::TaskManager;
+use vault::Vault;
 
 const APP_NAME: &str = "exomem";
 
@@ -49,42 +50,48 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
 
-    let mut state = State::new();
+    let mut vault = Vault::open("vault.db");
+    let mut task_runner = TaskRunner::new(&mut vault);
 
     match &cli.command {
-        Commands::List => state.list(),
-        Commands::Get { name } => state.get(name),
-        Commands::Put { name } => state.put(name),
+        Commands::List => task_runner.list(),
+        Commands::Get { name } => task_runner.get(name),
+        Commands::Put { name } => task_runner.put(name),
     }
 }
 
-struct State {
-    controller: Controller,
+/// Runs requested tasks and prints output to console.
+struct TaskRunner<'a> {
+    task_manager: TaskManager<'a>,
 }
 
-impl State {
-    fn new() -> State {
-        State {
-            controller: Controller::new(),
+impl<'a> TaskRunner<'a> {
+    /// Create a new `TaskRunner` for running tasks.
+    fn new(vault: &mut Vault) -> TaskRunner {
+        TaskRunner {
+            task_manager: TaskManager::new(vault),
         }
     }
 
+    /// Print the list of files.
     fn list(&self) {
-        let files = self.controller.list_files();
+        let files = self.task_manager.list();
         for file in files {
             println!("Have file: {file}");
         }
     }
 
+    /// Get a specific file.
     fn get(&self, filename: &str) {
-        match self.controller.get(filename) {
+        match self.task_manager.get(filename) {
             Some(f) => println!("Indeed, we have: {}", f.name),
             None => println!("But we don't have: {filename}"),
         }
     }
 
+    /// Put a specific file.
     fn put(&mut self, filename: &str) {
-        match self.controller.put(filename) {
+        match self.task_manager.put(filename) {
             Ok(f) => println!("Added: {}", f.name),
             Err(e) => println!("Failed to add: {e}"),
         }

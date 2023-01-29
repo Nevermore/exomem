@@ -78,6 +78,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "exomem-ui",
+ "exomem-vault",
 ]
 
 [[package]]

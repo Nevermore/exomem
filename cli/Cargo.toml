@@ -9,3 +9,4 @@ license = "AGPL-3.0-or-later"
 clap = { version = "4.1.4", features = [ "derive" ] }
 
 ui = { package = "exomem-ui", path = "../ui" }
+vault = { package = "exomem-vault", path = "../vault" }

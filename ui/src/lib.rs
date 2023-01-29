@@ -22,14 +22,13 @@ use std::io;
 use vault::File;
 use vault::Vault;
 
-pub struct Controller {
-    vault: Vault,
+pub struct TaskManager<'a> {
+    vault: &'a mut Vault,
 }
 
-impl Controller {
-    pub fn new() -> Controller {
-        let v = Vault::open(String::from("vault.db"));
-        Controller { vault: v }
+impl<'a> TaskManager<'a> {
+    pub fn new(vault: &mut Vault) -> TaskManager {
+        TaskManager { vault }
     }
 
     pub fn put(&mut self, s: &str) -> Result<&File, io::Error> {
@@ -40,13 +39,7 @@ impl Controller {
         self.vault.get(s)
     }
 
-    pub fn list_files(&self) -> Vec<&str> {
+    pub fn list(&self) -> Vec<&str> {
         self.vault.list()
-    }
-}
-
-impl Drop for Controller {
-    fn drop(&mut self) {
-        self.vault.close();
     }
 }

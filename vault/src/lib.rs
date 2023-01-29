@@ -19,32 +19,31 @@
 
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 mod file;
 pub use file::File;
 
 pub struct Vault {
-    location: String,
+    path: PathBuf,
     files: Vec<File>,
 }
 
 impl Vault {
-    pub fn open(location: String) -> Vault {
-        let mut v = Vault {
-            location,
+    pub fn open(path: impl Into<PathBuf>) -> Vault {
+        let path = path.into();
+        let mut vault = Vault {
+            path,
             files: Vec::new(),
         };
-
-        if let Ok(data) = fs::read_to_string(&v.location) {
-            v.deserialize(data);
+        if let Ok(data) = fs::read_to_string(&vault.path) {
+            vault.deserialize(data);
         }
-
-        v
+        vault
     }
 
     pub fn close(&self) {
-        fs::write(&self.location, self.serialize()).unwrap();
+        fs::write(&self.path, self.serialize()).unwrap();
     }
 
     fn serialize(&self) -> String {
@@ -80,5 +79,11 @@ impl Vault {
 
     pub fn list(&self) -> Vec<&str> {
         self.files.iter().map(|f| f.name.as_str()).collect()
+    }
+}
+
+impl Drop for Vault {
+    fn drop(&mut self) {
+        self.close();
     }
 }
