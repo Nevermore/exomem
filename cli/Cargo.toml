@@ -5,10 +5,6 @@ edition = "2018"
 publish = false
 license = "AGPL-3.0-or-later"
 
-[[bin]]
-name = "exomem"
-path = "src/main.rs"
-
 [dependencies]
 clap = "2.33.0"
 
