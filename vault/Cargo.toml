@@ -5,4 +5,5 @@ edition = "2021"
 publish = false
 license = "AGPL-3.0-or-later"
 
-[dependencies]
+[dev-dependencies]
+rand = "0.8.5"

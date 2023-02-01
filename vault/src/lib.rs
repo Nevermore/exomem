@@ -17,8 +17,10 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+mod block;
 mod file;
 mod vault;
 
+pub use block::*;
 pub use file::File;
 pub use vault::Vault;
