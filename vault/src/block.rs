@@ -49,6 +49,11 @@ impl BlockId {
         (self.data[0] & 0b0000_0001u8) == 0
     }
 
+    /// Returns `true` if the block is of a [`supported_version`] and unused bits are zero.
+    pub fn valid(&self) -> bool {
+        self.supported_version() && (self.data[0] & 0b1100_0000u8 == 0)
+    }
+
     /// Returns `true` if the block has a header.
     pub fn block_has_header(&self) -> bool {
         // The second least significant bit determines the kind of block.
@@ -158,12 +163,14 @@ mod tests {
         id_bytes[0] = 0b0000_0000;
         let block_id = BlockId::new(id_bytes);
         assert!(block_id.supported_version());
+        assert!(block_id.valid());
         assert!(!block_id.block_has_header());
         assert_eq!(block_id.block_size(), 4096);
 
         id_bytes[0] = 0b0000_0001;
         let block_id = BlockId::new(id_bytes);
         assert!(!block_id.supported_version());
+        assert!(!block_id.valid());
 
         for unused_bit_a in 0..=1 {
             for unused_bit_b in 0..=1 {
@@ -185,6 +192,12 @@ mod tests {
                         assert!(block_id.supported_version());
                         assert_eq!(block_id.block_has_header(), header == 1);
                         assert_eq!(block_id.block_size(), 2usize.pow(12 + size_marker as u32));
+
+                        if unused_bit_a == 1 || unused_bit_b == 1 {
+                            assert!(!block_id.valid());
+                        } else {
+                            assert!(block_id.valid());
+                        }
                     }
                 }
             }
