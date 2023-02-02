@@ -1,5 +1,5 @@
 /*
-    Copyright 2019-2023 OÜ Nevermore <strom@nevermore.ee>
+    Copyright 2023 OÜ Nevermore <strom@nevermore.ee>
 
     This file is part of exomem.
 
@@ -17,12 +17,25 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-mod block;
-mod file;
-mod shard;
-mod vault;
+/// `ShardId` is a globally unique 64 bit [`Shard`] identifier.
+///
+/// The 64 bits were chosen to match processor word size and provide a good enough supply of ids.
+///
+/// 64 bits provides 8 billion people each 2 billion ids.
+/// With proper id recycling in place this should be enough.
+pub struct ShardId {
+    /// Globally unique 64 bit identifier.
+    id: u64,
+}
 
-pub use block::*;
-pub use file::File;
-pub use shard::*;
-pub use vault::Vault;
+impl ShardId {
+    /// Create a `ShardId` from its inner `u64`.
+    pub fn new(id: u64) -> ShardId {
+        ShardId { id }
+    }
+
+    /// Returns the inner `u64` of the `ShardId`.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
