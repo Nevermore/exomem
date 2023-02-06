@@ -59,14 +59,14 @@ enum Commands {
 
 fn main() {
     let cli = Cli::parse();
-    let mut provider = Provider::new();
+    let provider = Provider::new();
 
     if let Commands::Init { name } = &cli.command {
-        TaskRunner::init(&mut provider, name);
+        TaskRunner::init(&provider, name);
         return;
     }
 
-    let mut vault = Vault::open(&mut provider, "vault.db");
+    let mut vault = Vault::open(&provider, "vault.db");
     let mut task_runner = TaskRunner::new(&mut vault);
 
     match &cli.command {
@@ -124,7 +124,7 @@ impl<'a> TaskRunner<'a> {
         }
     }
 
-    fn init(provider: &mut Provider, name: &str) {
+    fn init(provider: &Provider, name: &str) {
         TaskManager::init(provider, name);
     }
 

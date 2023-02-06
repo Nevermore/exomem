@@ -42,7 +42,7 @@ impl<'a> TaskManager<'a> {
         self.vault.create_directory(s);
     }
 
-    pub fn init(provider: &mut Provider, name: &str) {
+    pub fn init(provider: &Provider, name: &str) {
         Vault::initialize(provider, name);
     }
 

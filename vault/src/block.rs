@@ -19,6 +19,7 @@
 
 use std::fmt;
 
+use bytes::Bytes;
 use capnp::message::{self, ReaderOptions, ReaderSegments, TypedBuilder};
 
 use crate::vault_capnp::{block, index, node, union_id, NodeKind};
@@ -66,7 +67,7 @@ impl BlockId {
 
     /// Returns the raw bytes that make up this `BlockId`.
     pub fn data(&self) -> &[u8; 32] {
-        return &self.data;
+        &self.data
     }
 
     /// Returns the first of the raw bytes, which is the header byte.
@@ -168,23 +169,27 @@ impl BlockKind {
 }
 
 /// Immutable encrypted block.
+#[derive(Clone)]
 pub struct EncryptedBlock {
     /// The raw bytes of this encrypted block.
-    data: Vec<u8>,
+    data: Bytes,
 }
 
 impl EncryptedBlock {
+    /// Returns an empty [`EncryptedBlock`].
+    pub const fn empty() -> EncryptedBlock {
+        EncryptedBlock { data: Bytes::new() }
+    }
+
     /// Returns a new [`EncryptedBlock`] with the provided raw `data`.
-    pub fn from_data(data: Vec<u8>) -> EncryptedBlock {
+    pub fn from_data(data: Bytes) -> EncryptedBlock {
         EncryptedBlock { data }
     }
 
     /// Returns a new [`EncryptedBlock`] based on `block`.
     pub fn encrypt(block: &Block, _key: u128) -> EncryptedBlock {
         // TODO: Actually encrypt
-        EncryptedBlock {
-            data: Vec::from(block.data()),
-        }
+        EncryptedBlock { data: block.data() }
     }
 
     /// Returns the decrypted [`Block`].
@@ -194,49 +199,55 @@ impl EncryptedBlock {
     }
 
     /// Returns a reference to the block's data.
-    pub fn data(&self) -> &[u8] {
-        self.data.as_slice()
+    pub fn data(&self) -> Bytes {
+        self.data.clone()
     }
 
     /// Returns the [`BlockId`] of this [`EncryptedBlock`].
     pub fn id(&self, kind: BlockKind) -> BlockId {
-        let hash = blake3::hash(self.data());
-        BlockId::new(hash, self.data().len(), kind.has_header())
+        let hash = blake3::hash(self.data.as_ref());
+        BlockId::new(hash, self.data.len(), kind.has_header())
     }
 }
 
 /// Immutable unencrypted block.
+#[derive(Clone)]
 pub struct Block {
     /// The raw bytes of this unencrypted block.
-    data: Vec<u8>,
+    data: Bytes,
 }
 
 impl Block {
     /// Returns an empty [`Block`].
     pub const fn empty() -> Block {
-        Block { data: Vec::new() }
+        Block { data: Bytes::new() }
     }
 
     /// Returns a new [`Block`] from the provided raw `data`.
-    pub fn from_data(data: Vec<u8>) -> Block {
+    pub fn from_data(data: Bytes) -> Block {
         Block { data }
     }
 
     /// Returns a reference to the block's raw data.
-    pub fn data(&self) -> &[u8] {
-        self.data.as_slice()
+    pub fn data(&self) -> Bytes {
+        self.data.clone()
     }
 
     /// Returns the block's size in bytes.
     pub fn size(&self) -> usize {
         self.data.len()
     }
+
+    /// Returns an [`InfoBlock`] if you know this is an info block.
+    pub fn info(&self) -> InfoBlock {
+        InfoBlock::from(self.clone())
+    }
 }
 
 impl ReaderSegments for Block {
     fn get_segment(&self, idx: u32) -> Option<&[u8]> {
         match idx {
-            0 => Some(self.data()),
+            0 => Some(self.data.as_ref()),
             _ => None,
         }
     }
@@ -251,17 +262,17 @@ impl ReaderSegments for Block {
 }
 
 /// Immutable unencrypted info block.
-pub struct InfoBlock<'a> {
+pub struct InfoBlock {
     /// The underlying unencrypted [`Block`].
-    block: &'a Block,
+    block: Block,
     /// A capnp message reader pointed to the underlying block.
-    message_reader: message::Reader<&'a Block>,
+    message_reader: message::Reader<Block>,
 }
 
-impl<'a> From<&'a Block> for InfoBlock<'a> {
-    fn from(block: &'a Block) -> Self {
+impl From<Block> for InfoBlock {
+    fn from(block: Block) -> Self {
         InfoBlock {
-            block,
+            block: block.clone(),
             // We construct a capnp message reader directly without doing any segment analysis.
             // Our messages are always expected to be a single segment.
             message_reader: message::Reader::new(block, ReaderOptions::new()),
@@ -269,7 +280,7 @@ impl<'a> From<&'a Block> for InfoBlock<'a> {
     }
 }
 
-impl<'a> InfoBlock<'a> {
+impl InfoBlock {
     pub fn new_vault(root: BlockId, index: BlockId) -> Block {
         let mut message_b = TypedBuilder::<block::Owned>::new_default(); // TODO: Look into allocation strategies
         let block_b = message_b.init_root();
@@ -290,13 +301,13 @@ impl<'a> InfoBlock<'a> {
         index_block_id_b.set_d4(u64::from_le_bytes(index.data[24..32].try_into().unwrap()));
 
         let segment = match message_b.borrow_inner().get_segments_for_output() {
-            capnp::OutputSegments::SingleSegment(ss) => ss[0],
+            capnp::OutputSegments::SingleSegment(ss) => Bytes::copy_from_slice(ss[0]),
             capnp::OutputSegments::MultiSegment(_) => {
                 panic!("got multiple output segments, but our reader doesn't want that")
             }
         };
 
-        Block::from_data(segment.into())
+        Block::from_data(segment)
     }
 
     pub fn new_index() -> Block {
@@ -304,13 +315,13 @@ impl<'a> InfoBlock<'a> {
         let _block_b = message_b.init_root();
 
         let segment = match message_b.borrow_inner().get_segments_for_output() {
-            capnp::OutputSegments::SingleSegment(ss) => ss[0],
+            capnp::OutputSegments::SingleSegment(ss) => Bytes::copy_from_slice(ss[0]),
             capnp::OutputSegments::MultiSegment(_) => {
                 panic!("got multiple output segments, but our reader doesn't want that")
             }
         };
 
-        Block::from_data(segment.into())
+        Block::from_data(segment)
     }
 
     pub fn new_directory() -> Block {
@@ -322,18 +333,18 @@ impl<'a> InfoBlock<'a> {
         directory_b.init_entries(0);
 
         let segment = match message_b.borrow_inner().get_segments_for_output() {
-            capnp::OutputSegments::SingleSegment(ss) => ss[0],
+            capnp::OutputSegments::SingleSegment(ss) => Bytes::copy_from_slice(ss[0]),
             capnp::OutputSegments::MultiSegment(_) => {
                 panic!("got multiple output segments, but our reader doesn't want that")
             }
         };
 
-        Block::from_data(segment.into())
+        Block::from_data(segment)
     }
 
-    /// Returns the underlying `Block` reference.
-    pub fn block(&self) -> &Block {
-        self.block
+    /// Returns the underlying `Block`.
+    pub fn block(&self) -> Block {
+        self.block.clone()
     }
 
     /// Returns a new instance of `block::Reader`.
@@ -464,13 +475,13 @@ impl<'a> InfoBlock<'a> {
         }
 
         let segment = match message_b.borrow_inner().get_segments_for_output() {
-            capnp::OutputSegments::SingleSegment(ss) => ss[0],
+            capnp::OutputSegments::SingleSegment(ss) => Bytes::copy_from_slice(ss[0]),
             capnp::OutputSegments::MultiSegment(_) => {
                 panic!("got multiple output segments, but our reader doesn't want that")
             }
         };
 
-        Block::from_data(segment.into())
+        Block::from_data(segment)
     }
 
     pub fn directory_list(&self, node_idx: u32) -> Vec<(NodeKind, &str)> {
