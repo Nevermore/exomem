@@ -23,6 +23,8 @@ mod node;
 mod provider;
 mod shard;
 mod vault;
+
+#[allow(dead_code)]
 mod vault_capnp;
 
 pub use block::*;

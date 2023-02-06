@@ -17,7 +17,7 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-use std::io;
+use std::{io, path::PathBuf};
 
 use vault::{File, NodeKind, Provider, Vault};
 
@@ -46,7 +46,7 @@ impl<'a> TaskManager<'a> {
         Vault::initialize(provider, name);
     }
 
-    pub fn list(&mut self) -> Vec<(NodeKind, &str)> {
-        self.vault.list()
+    pub fn list(&mut self, path: impl Into<PathBuf>) -> Vec<(NodeKind, &str)> {
+        self.vault.list(path)
     }
 }

@@ -147,7 +147,10 @@ impl<'a> Vault<'a> {
         None
     }
 
-    pub fn list(&mut self) -> Vec<(NodeKind, &str)> {
+    pub fn list(&mut self, path: impl Into<PathBuf>) -> Vec<(NodeKind, &str)> {
+        // TODO: Determine the block for this path
+        let path: PathBuf = path.into();
+
         self.root.directory_list(0)
     }
 }

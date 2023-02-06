@@ -34,7 +34,10 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// List all your files and directories.
-    List,
+    List {
+        /// The directory to list the contents of.
+        path: Option<String>,
+    },
     /// Get a file.
     Get {
         /// The file to get.
@@ -70,7 +73,7 @@ fn main() {
     let mut task_runner = TaskRunner::new(&mut vault);
 
     match &cli.command {
-        Commands::List => task_runner.list(),
+        Commands::List { path } => task_runner.list(path),
         Commands::Get { name } => task_runner.get(name),
         Commands::Put { name } => task_runner.put(name),
         Commands::Mkdir { name } => task_runner.create_directory(name),
@@ -100,9 +103,10 @@ impl<'a> TaskRunner<'a> {
     }
 
     /// Print the list of entries in the directory.
-    fn list(&mut self) {
-        println!("The list of entries is:");
-        let entries = self.task_manager.list();
+    fn list(&mut self, path: &Option<String>) {
+        let path = path.as_ref().map_or_else(|| "/", |path| path);
+        println!("Listing {path}");
+        let entries = self.task_manager.list(path);
         for (kind, name) in entries {
             println!("{}    {name}", nice_node_kind(kind));
         }
