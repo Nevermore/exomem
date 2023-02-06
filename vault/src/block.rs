@@ -413,6 +413,36 @@ impl InfoBlock {
         (root_id, index_id)
     }
 
+    pub fn update_root_id(&self, id: BlockId) -> Block {
+        let block_r = self.block_reader();
+
+        let mut message_b = TypedBuilder::<block::Owned>::new_default();
+        message_b.set_root(block_r).unwrap();
+        let block_b = message_b.get_root().unwrap();
+        let nodes_b = block_b.get_nodes().unwrap();
+        let node_b = nodes_b.get(0);
+
+        let node::Vault(vault_b) = node_b.which().unwrap() else {
+            panic!("Unexpected node");
+        };
+        let vault_b = vault_b.unwrap();
+        let root_b = vault_b.init_root();
+        let mut root_block_id_b = root_b.init_block_id();
+        root_block_id_b.set_d1(u64::from_le_bytes(id.data[0..8].try_into().unwrap()));
+        root_block_id_b.set_d2(u64::from_le_bytes(id.data[8..16].try_into().unwrap()));
+        root_block_id_b.set_d3(u64::from_le_bytes(id.data[16..24].try_into().unwrap()));
+        root_block_id_b.set_d4(u64::from_le_bytes(id.data[24..32].try_into().unwrap()));
+
+        let segment = match message_b.borrow_inner().get_segments_for_output() {
+            capnp::OutputSegments::SingleSegment(ss) => Bytes::copy_from_slice(ss[0]),
+            capnp::OutputSegments::MultiSegment(_) => {
+                panic!("got multiple output segments, but our reader doesn't want that")
+            }
+        };
+
+        Block::from_data(segment)
+    }
+
     /// Creates a new node of `kind` with `name`.
     ///
     /// Returns the new [`Block`].
@@ -432,19 +462,25 @@ impl InfoBlock {
 
         let mut message_b = TypedBuilder::<block::Owned>::new_default();
         message_b.set_root(block_r).unwrap();
-        let block = message_b.get_root().unwrap();
+        let block_b = message_b.get_root().unwrap();
 
-        let mut nodes = block.init_nodes(old_nodes_len + 1);
         // TODO: Don't init more nodes if we're not gonna inline
-        //let nodes = block_r.reborrow().get_nodes().unwrap();
-        let node = nodes.reborrow().get(0);
+        let mut nodes_b = block_b.init_nodes(old_nodes_len + 1);
+        for i in 0..old_nodes_len {
+            let old_node = nodes_r.reborrow().get(i);
+            nodes_b.set_with_caveats(i, old_node).unwrap();
+        }
 
-        let node::Directory(dir) = node.which().unwrap() else {
-            panic!("Unexpected node");
+        let node_b = nodes_b.reborrow().get(0);
+
+        let directory_b = match node_b.which().unwrap() {
+            node::Directory(directory_b) => directory_b,
+            node::Vault(_) => panic!("Unexpected vault node in the builder."),
+            node::File(_) => panic!("Unexpected file node in the builder."),
         };
-        let dir = dir.unwrap();
+        let directory_b = directory_b.unwrap();
 
-        let mut entries = dir.init_entries(old_len + 1);
+        let mut entries = directory_b.init_entries(old_len + 1);
         for i in 0..old_len {
             let old_entry = entries_r.reborrow().get(i);
             entries.set_with_caveats(i, old_entry).unwrap();
@@ -458,7 +494,7 @@ impl InfoBlock {
         let next_local_id = old_nodes_len;
         id.set_local_id(next_local_id as u16); // TODO: Make sure we're not truncating
 
-        let inline_node = nodes.get(next_local_id);
+        let inline_node = nodes_b.get(next_local_id);
         match kind {
             NodeKind::Directory => {
                 let directory = inline_node.init_directory();
