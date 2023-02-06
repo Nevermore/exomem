@@ -19,10 +19,14 @@
 
 use std::fmt;
 
+use capnp::message::{self, ReaderOptions, ReaderSegments, TypedBuilder};
+
+use crate::vault_capnp::{block, index, node, union_id, NodeKind};
+
 /// `BlockId` is a globally unique 256 bit identifier for [`Block`].
 ///
 /// It also contains a header with some information about the block.
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 pub struct BlockId {
     /// The raw bytes that make up this `BlockId`.
     ///
@@ -32,9 +36,37 @@ pub struct BlockId {
 }
 
 impl BlockId {
-    /// Create a new `BlockId` from raw `bytes`.
-    pub fn new(bytes: [u8; 32]) -> BlockId {
-        BlockId { data: bytes }
+    /// Create a new `BlockId` from the provided `hash` and options.
+    pub fn new(hash: blake3::Hash, size: usize, has_header: bool) -> BlockId {
+        let mut id = BlockId {
+            data: *hash.as_bytes(),
+        };
+        id.set_header(size, has_header);
+        id
+    }
+
+    /// Create a new `BlockId` from raw `data`.
+    pub fn from_data(data: [u8; 32]) -> BlockId {
+        BlockId { data }
+    }
+
+    // TODO: Write tests for this at every size
+    fn set_header(&mut self, size: usize, has_header: bool) {
+        let size_marker = 12 - size.ilog2() as u8;
+        if size_marker > 15 {
+            panic!("Unexpected size marker");
+        }
+        let mut header = 0;
+        if has_header {
+            header |= 0b0000_0010u8;
+        }
+        header |= size_marker << 2;
+        self.data[0] = header
+    }
+
+    /// Returns the raw bytes that make up this `BlockId`.
+    pub fn data(&self) -> &[u8; 32] {
+        return &self.data;
     }
 
     /// Returns the first of the raw bytes, which is the header byte.
@@ -86,14 +118,22 @@ impl BlockId {
         // Ranges from 4 KiB to 128 MiB.
         2usize.pow(12 + size_marker as u32)
     }
+
+    /// Returns the Base64 representation of the `BlockId`.
+    pub fn base64(&self) -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+        URL_SAFE_NO_PAD.encode(self.data)
+    }
 }
 
 impl fmt::Display for BlockId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: Figure out if there is a more efficient printing code
         write!(
             f,
-            "0x{:02X}{:02X}{:02X}{:02X}",
-            self.data[0], self.data[1], self.data[2], self.data[3]
+            "{:032x}{:032x}",
+            u128::from_le_bytes(self.data.as_slice()[0..16].try_into().unwrap()),
+            u128::from_le_bytes(self.data.as_slice()[16..32].try_into().unwrap()),
         )
     }
 }
@@ -117,19 +157,40 @@ pub enum BlockKind {
     Info,
 }
 
-/// Immutable unencrypted block.
-pub struct Block {
-    kind: BlockKind,
+impl BlockKind {
+    /// Returns `true` if this kind of block has a header.
+    pub fn has_header(&self) -> bool {
+        match self {
+            BlockKind::Data => false,
+            BlockKind::Info => true,
+        }
+    }
+}
+
+/// Immutable encrypted block.
+pub struct EncryptedBlock {
+    /// The raw bytes of this encrypted block.
     data: Vec<u8>,
 }
 
-impl Block {
-    /// Create a new `Block`.
-    pub fn new(kind: BlockKind, size: usize) -> Block {
-        Block {
-            kind,
-            data: vec![0; size],
+impl EncryptedBlock {
+    /// Returns a new [`EncryptedBlock`] with the provided raw `data`.
+    pub fn from_data(data: Vec<u8>) -> EncryptedBlock {
+        EncryptedBlock { data }
+    }
+
+    /// Returns a new [`EncryptedBlock`] based on `block`.
+    pub fn encrypt(block: &Block, _key: u128) -> EncryptedBlock {
+        // TODO: Actually encrypt
+        EncryptedBlock {
+            data: Vec::from(block.data()),
         }
+    }
+
+    /// Returns the decrypted [`Block`].
+    pub fn decrypt(&self, _key: u128) -> Block {
+        // TODO: Actually decrypt
+        Block::from_data(self.data.clone())
     }
 
     /// Returns a reference to the block's data.
@@ -137,14 +198,315 @@ impl Block {
         self.data.as_slice()
     }
 
-    /// Returns the block's [`BlockKind`].
-    pub fn kind(&self) -> BlockKind {
-        self.kind
+    /// Returns the [`BlockId`] of this [`EncryptedBlock`].
+    pub fn id(&self, kind: BlockKind) -> BlockId {
+        let hash = blake3::hash(self.data());
+        BlockId::new(hash, self.data().len(), kind.has_header())
+    }
+}
+
+/// Immutable unencrypted block.
+pub struct Block {
+    /// The raw bytes of this unencrypted block.
+    data: Vec<u8>,
+}
+
+impl Block {
+    /// Returns an empty [`Block`].
+    pub const fn empty() -> Block {
+        Block { data: Vec::new() }
+    }
+
+    /// Returns a new [`Block`] from the provided raw `data`.
+    pub fn from_data(data: Vec<u8>) -> Block {
+        Block { data }
+    }
+
+    /// Returns a reference to the block's raw data.
+    pub fn data(&self) -> &[u8] {
+        self.data.as_slice()
     }
 
     /// Returns the block's size in bytes.
     pub fn size(&self) -> usize {
         self.data.len()
+    }
+}
+
+impl ReaderSegments for Block {
+    fn get_segment(&self, idx: u32) -> Option<&[u8]> {
+        match idx {
+            0 => Some(self.data()),
+            _ => None,
+        }
+    }
+
+    fn len(&self) -> usize {
+        1
+    }
+
+    fn is_empty(&self) -> bool {
+        false
+    }
+}
+
+/// Immutable unencrypted info block.
+pub struct InfoBlock<'a> {
+    /// The underlying unencrypted [`Block`].
+    block: &'a Block,
+    /// A capnp message reader pointed to the underlying block.
+    message_reader: message::Reader<&'a Block>,
+}
+
+impl<'a> From<&'a Block> for InfoBlock<'a> {
+    fn from(block: &'a Block) -> Self {
+        InfoBlock {
+            block,
+            // We construct a capnp message reader directly without doing any segment analysis.
+            // Our messages are always expected to be a single segment.
+            message_reader: message::Reader::new(block, ReaderOptions::new()),
+        }
+    }
+}
+
+impl<'a> InfoBlock<'a> {
+    pub fn new_vault(root: BlockId, index: BlockId) -> Block {
+        let mut message_b = TypedBuilder::<block::Owned>::new_default(); // TODO: Look into allocation strategies
+        let block_b = message_b.init_root();
+        let nodes_b = block_b.init_nodes(1);
+        let node_b = nodes_b.get(0);
+        let mut vault_b = node_b.init_vault();
+        let root_b = vault_b.reborrow().init_root();
+        let mut root_block_id_b = root_b.init_block_id();
+        root_block_id_b.set_d1(u64::from_le_bytes(root.data[0..8].try_into().unwrap()));
+        root_block_id_b.set_d2(u64::from_le_bytes(root.data[8..16].try_into().unwrap()));
+        root_block_id_b.set_d3(u64::from_le_bytes(root.data[16..24].try_into().unwrap()));
+        root_block_id_b.set_d4(u64::from_le_bytes(root.data[24..32].try_into().unwrap()));
+        let index_b = vault_b.init_index();
+        let mut index_block_id_b = index_b.init_block_id();
+        index_block_id_b.set_d1(u64::from_le_bytes(index.data[0..8].try_into().unwrap()));
+        index_block_id_b.set_d2(u64::from_le_bytes(index.data[8..16].try_into().unwrap()));
+        index_block_id_b.set_d3(u64::from_le_bytes(index.data[16..24].try_into().unwrap()));
+        index_block_id_b.set_d4(u64::from_le_bytes(index.data[24..32].try_into().unwrap()));
+
+        let segment = match message_b.borrow_inner().get_segments_for_output() {
+            capnp::OutputSegments::SingleSegment(ss) => ss[0],
+            capnp::OutputSegments::MultiSegment(_) => {
+                panic!("got multiple output segments, but our reader doesn't want that")
+            }
+        };
+
+        Block::from_data(segment.into())
+    }
+
+    pub fn new_index() -> Block {
+        let mut message_b = TypedBuilder::<index::Owned>::new_default(); // TODO: Look into allocation strategies
+        let _block_b = message_b.init_root();
+
+        let segment = match message_b.borrow_inner().get_segments_for_output() {
+            capnp::OutputSegments::SingleSegment(ss) => ss[0],
+            capnp::OutputSegments::MultiSegment(_) => {
+                panic!("got multiple output segments, but our reader doesn't want that")
+            }
+        };
+
+        Block::from_data(segment.into())
+    }
+
+    pub fn new_directory() -> Block {
+        let mut message_b = TypedBuilder::<block::Owned>::new_default(); // TODO: Look into allocation strategies
+        let block_b = message_b.init_root();
+        let nodes_b = block_b.init_nodes(1);
+        let node_b = nodes_b.get(0);
+        let directory_b = node_b.init_directory();
+        directory_b.init_entries(0);
+
+        let segment = match message_b.borrow_inner().get_segments_for_output() {
+            capnp::OutputSegments::SingleSegment(ss) => ss[0],
+            capnp::OutputSegments::MultiSegment(_) => {
+                panic!("got multiple output segments, but our reader doesn't want that")
+            }
+        };
+
+        Block::from_data(segment.into())
+    }
+
+    /// Returns the underlying `Block` reference.
+    pub fn block(&self) -> &Block {
+        self.block
+    }
+
+    /// Returns a new instance of `block::Reader`.
+    fn block_reader(&self) -> block::Reader {
+        // Unfortunately Rust lifetimes make it difficult to cache the resulting struct.
+        // Luckily the amount of work being done here is minimal.
+        self.message_reader
+            .get_root::<block::Reader>()
+            .expect("failed to get block reader")
+    }
+
+    pub fn get_root_id_and_index_id(&self) -> (BlockId, BlockId) {
+        let block_r = self.block_reader();
+        let nodes_r = block_r.get_nodes().unwrap();
+        let node_r = nodes_r.get(0);
+
+        let node::Vault(vault_r) = node_r.which().unwrap() else {
+            panic!("Unexpected node");
+        };
+        let vault_r = vault_r.unwrap();
+
+        let root_r = vault_r.get_root().unwrap();
+        let root_id = match root_r.which().unwrap() {
+            union_id::Which::LocalId(_) => todo!(),
+            union_id::Which::BlockId(block_id_r) => {
+                let block_id_r = block_id_r.unwrap();
+                let d1 = block_id_r.get_d1().to_le_bytes();
+                let d2 = block_id_r.get_d2().to_le_bytes();
+                let d3 = block_id_r.get_d3().to_le_bytes();
+                let d4 = block_id_r.get_d4().to_le_bytes();
+
+                // TODO: capnp::raw::get_struct_data_section better?
+
+                let mut result = [0; 32];
+                result[0..8].copy_from_slice(&d1);
+                result[8..16].copy_from_slice(&d2);
+                result[16..24].copy_from_slice(&d3);
+                result[24..32].copy_from_slice(&d4);
+
+                BlockId::from_data(result)
+            }
+            union_id::Which::ShardId(_) => todo!(),
+        };
+
+        let index_r = vault_r.get_root().unwrap();
+        let index_id = match index_r.which().unwrap() {
+            union_id::Which::LocalId(_) => todo!(),
+            union_id::Which::BlockId(block_id_r) => {
+                let block_id_r = block_id_r.unwrap();
+                let d1 = block_id_r.get_d1().to_le_bytes();
+                let d2 = block_id_r.get_d2().to_le_bytes();
+                let d3 = block_id_r.get_d3().to_le_bytes();
+                let d4 = block_id_r.get_d4().to_le_bytes();
+
+                let mut result = [0; 32];
+                result[0..8].copy_from_slice(&d1);
+                result[8..16].copy_from_slice(&d2);
+                result[16..24].copy_from_slice(&d3);
+                result[24..32].copy_from_slice(&d4);
+
+                BlockId::from_data(result)
+            }
+            union_id::Which::ShardId(_) => todo!(),
+        };
+
+        (root_id, index_id)
+    }
+
+    /// Creates a new node of `kind` with `name`.
+    ///
+    /// Returns the new [`Block`].
+    pub fn create(&self, name: &str, kind: NodeKind) -> Block {
+        let block_r = self.block_reader();
+        let nodes_r = block_r.get_nodes().unwrap();
+        let old_nodes_len = nodes_r.len();
+        let node_r = nodes_r.get(0);
+
+        let node::Directory(directory_r) = node_r.which().unwrap() else {
+            panic!("Unexpected node");
+        };
+        let directory_r = directory_r.unwrap();
+
+        let entries_r = directory_r.get_entries().unwrap();
+        let old_len = entries_r.len();
+
+        let mut message_b = TypedBuilder::<block::Owned>::new_default();
+        message_b.set_root(block_r).unwrap();
+        let block = message_b.get_root().unwrap();
+
+        let mut nodes = block.init_nodes(old_nodes_len + 1);
+        // TODO: Don't init more nodes if we're not gonna inline
+        //let nodes = block_r.reborrow().get_nodes().unwrap();
+        let node = nodes.reborrow().get(0);
+
+        let node::Directory(dir) = node.which().unwrap() else {
+            panic!("Unexpected node");
+        };
+        let dir = dir.unwrap();
+
+        let mut entries = dir.init_entries(old_len + 1);
+        for i in 0..old_len {
+            let old_entry = entries_r.reborrow().get(i);
+            entries.set_with_caveats(i, old_entry).unwrap();
+        }
+
+        let mut entry = entries.reborrow().get(old_len);
+        entry.set_name(name);
+
+        // TODO: Add ability to create this new node in a brand new block instead, and then reference it with blockId
+        let mut id = entry.init_id();
+        let next_local_id = old_nodes_len;
+        id.set_local_id(next_local_id as u16); // TODO: Make sure we're not truncating
+
+        let inline_node = nodes.get(next_local_id);
+        match kind {
+            NodeKind::Directory => {
+                let directory = inline_node.init_directory();
+                directory.init_entries(0);
+            }
+            NodeKind::File => {
+                let mut file = inline_node.init_file();
+                file.set_size(1234);
+                // TODO: Set id
+            }
+            NodeKind::Vault => {
+                // TODO
+            }
+        }
+
+        let segment = match message_b.borrow_inner().get_segments_for_output() {
+            capnp::OutputSegments::SingleSegment(ss) => ss[0],
+            capnp::OutputSegments::MultiSegment(_) => {
+                panic!("got multiple output segments, but our reader doesn't want that")
+            }
+        };
+
+        Block::from_data(segment.into())
+    }
+
+    pub fn directory_list(&self, node_idx: u32) -> Vec<(NodeKind, &str)> {
+        let block_r = self.block_reader();
+        let nodes_r = block_r.get_nodes().unwrap();
+        let node_r = nodes_r.get(node_idx);
+
+        let node::Directory(directory_r) = node_r.which().unwrap() else {
+            panic!("Unexpected node");
+        };
+        let directory_r = directory_r.unwrap();
+
+        let entries_r = directory_r.get_entries().unwrap();
+
+        let mut result = Vec::<(NodeKind, &str)>::with_capacity(entries_r.len() as usize);
+        for entry_r in entries_r.iter() {
+            assert!(entry_r.has_id());
+            let id_r = entry_r.get_id().expect("failed to get id");
+            let kind = match id_r.which().expect("failed to get readable id") {
+                union_id::Which::LocalId(local_id) => {
+                    let entry_node_r = nodes_r.get(local_id as u32);
+                    match entry_node_r.which().expect("not a readable node") {
+                        node::Which::Directory(_) => NodeKind::Directory,
+                        node::Which::File(_) => NodeKind::File,
+                        node::Which::Vault(_) => NodeKind::Vault,
+                    }
+                }
+                union_id::Which::BlockId(_) => unimplemented!(),
+                union_id::Which::ShardId(_) => unimplemented!(),
+            };
+
+            let name = entry_r.get_name().unwrap();
+            result.push((kind, name));
+        }
+
+        result
     }
 }
 
@@ -161,14 +523,14 @@ mod tests {
         thread_rng().fill(&mut id_bytes[..]);
 
         id_bytes[0] = 0b0000_0000;
-        let block_id = BlockId::new(id_bytes);
+        let block_id = BlockId::from_data(id_bytes);
         assert!(block_id.supported_version());
         assert!(block_id.valid());
         assert!(!block_id.block_has_header());
         assert_eq!(block_id.block_size(), 4096);
 
         id_bytes[0] = 0b0000_0001;
-        let block_id = BlockId::new(id_bytes);
+        let block_id = BlockId::from_data(id_bytes);
         assert!(!block_id.supported_version());
         assert!(!block_id.valid());
 
@@ -188,7 +550,7 @@ mod tests {
                         }
                         id_bytes[0] |= size_marker << 2;
 
-                        let block_id = BlockId::new(id_bytes);
+                        let block_id = BlockId::from_data(id_bytes);
                         assert!(block_id.supported_version());
                         assert_eq!(block_id.block_has_header(), header == 1);
                         assert_eq!(block_id.block_size(), 2usize.pow(12 + size_marker as u32));
@@ -212,19 +574,19 @@ mod tests {
 
         thread_rng().fill(&mut id_bytes[..]);
         id_bytes[0] = 0b0001_1100;
-        let bid_a = BlockId::new(id_bytes);
+        let bid_a = BlockId::from_data(id_bytes);
         bids.push(bid_a);
         thread_rng().fill(&mut id_bytes[..]);
         id_bytes[0] = 0b0011_1100;
-        let bid_b = BlockId::new(id_bytes);
+        let bid_b = BlockId::from_data(id_bytes);
         bids.push(bid_b);
         thread_rng().fill(&mut id_bytes[..]);
         id_bytes[0] = 0b0001_1010;
-        let bid_c = BlockId::new(id_bytes);
+        let bid_c = BlockId::from_data(id_bytes);
         bids.push(bid_c);
         thread_rng().fill(&mut id_bytes[..]);
         id_bytes[0] = 0b0011_1000;
-        let bid_d = BlockId::new(id_bytes);
+        let bid_d = BlockId::from_data(id_bytes);
         bids.push(bid_d);
 
         // Before sort

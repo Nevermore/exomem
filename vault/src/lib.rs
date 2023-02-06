@@ -19,10 +19,17 @@
 
 mod block;
 mod file;
+mod node;
+mod provider;
 mod shard;
 mod vault;
+mod vault_capnp;
 
 pub use block::*;
-pub use file::File;
+pub use file::*;
+pub use node::*;
+pub use provider::*;
 pub use shard::*;
-pub use vault::Vault;
+pub use vault::*;
+
+pub use vault_capnp::NodeKind;

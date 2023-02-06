@@ -17,6 +17,8 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+use std::num::NonZeroU64;
+
 /// `ShardId` is a globally unique 64 bit [`Shard`] identifier.
 ///
 /// The 64 bits were chosen to match processor word size and provide a good enough supply of ids.
@@ -25,17 +27,17 @@
 /// With proper id recycling in place this should be enough.
 pub struct ShardId {
     /// Globally unique 64 bit identifier.
-    id: u64,
+    id: NonZeroU64,
 }
 
 impl ShardId {
-    /// Create a `ShardId` from its inner `u64`.
-    pub fn new(id: u64) -> ShardId {
+    /// Create a `ShardId` from its inner `NonZeroU64`.
+    pub fn new(id: NonZeroU64) -> ShardId {
         ShardId { id }
     }
 
-    /// Returns the inner `u64` of the `ShardId`.
-    pub fn id(&self) -> u64 {
+    /// Returns the inner `NonZeroU64` of the `ShardId`.
+    pub fn id(&self) -> NonZeroU64 {
         self.id
     }
 }

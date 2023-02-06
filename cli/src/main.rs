@@ -20,7 +20,7 @@
 use clap::{Parser, Subcommand};
 
 use ui::TaskManager;
-use vault::Vault;
+use vault::{NodeKind, Provider, Vault};
 
 const APP_NAME: &str = "exomem";
 
@@ -33,7 +33,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// List all your files.
+    /// List all your files and directories.
     List,
     /// Get a file.
     Get {
@@ -45,18 +45,44 @@ enum Commands {
         /// The file to put.
         name: String,
     },
+    /// Create a directory.
+    Mkdir {
+        /// The name of the directory to create.
+        name: String,
+    },
+    /// Initialize state.
+    Init {
+        /// The name of the state file.
+        name: String,
+    },
 }
 
 fn main() {
     let cli = Cli::parse();
+    let mut provider = Provider::new();
 
-    let mut vault = Vault::open("vault.db");
+    if let Commands::Init { name } = &cli.command {
+        TaskRunner::init(&mut provider, name);
+        return;
+    }
+
+    let mut vault = Vault::open(&mut provider, "vault.db");
     let mut task_runner = TaskRunner::new(&mut vault);
 
     match &cli.command {
         Commands::List => task_runner.list(),
         Commands::Get { name } => task_runner.get(name),
         Commands::Put { name } => task_runner.put(name),
+        Commands::Mkdir { name } => task_runner.create_directory(name),
+        Commands::Init { .. } => unreachable!(),
+    }
+}
+
+fn nice_node_kind(kind: NodeKind) -> &'static str {
+    match kind {
+        NodeKind::Directory => "Directory",
+        NodeKind::File => "File    .",
+        NodeKind::Vault => "Vault   .",
     }
 }
 
@@ -67,17 +93,18 @@ struct TaskRunner<'a> {
 
 impl<'a> TaskRunner<'a> {
     /// Create a new `TaskRunner` for running tasks.
-    fn new(vault: &mut Vault) -> TaskRunner {
+    fn new(vault: &'a mut Vault<'a>) -> TaskRunner<'a> {
         TaskRunner {
             task_manager: TaskManager::new(vault),
         }
     }
 
-    /// Print the list of files.
-    fn list(&self) {
-        let files = self.task_manager.list();
-        for file in files {
-            println!("Have file: {file}");
+    /// Print the list of entries in the directory.
+    fn list(&mut self) {
+        println!("The list of entries is:");
+        let entries = self.task_manager.list();
+        for (kind, name) in entries {
+            println!("{}    {name}", nice_node_kind(kind));
         }
     }
 
@@ -95,5 +122,20 @@ impl<'a> TaskRunner<'a> {
             Ok(f) => println!("Added: {}", f.name),
             Err(e) => println!("Failed to add: {e}"),
         }
+    }
+
+    fn init(provider: &mut Provider, name: &str) {
+        TaskManager::init(provider, name);
+    }
+
+    /// Create a directory.
+    fn create_directory(&mut self, name: &str) {
+        self.task_manager.create_directory(name);
+        /*
+        match self.task_manager.create_directory(name) {
+            Ok(f) => println!("Created: {}", f.name),
+            Err(e) => println!("Failed to add: {e}"),
+        }
+        */
     }
 }

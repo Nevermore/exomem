@@ -17,72 +17,110 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+use crate::BlockKind;
+use crate::EncryptedBlock;
 use crate::File;
+use crate::InfoBlock;
+use crate::NodeKind;
+use crate::Provider;
 
-pub struct Vault {
+pub struct Vault<'a> {
     path: PathBuf,
-    files: Vec<File>,
+    //provider: &'a mut Provider,
+    root: InfoBlock<'a>,
+    index: InfoBlock<'a>,
 }
 
-impl Vault {
-    pub fn open(path: impl Into<PathBuf>) -> Vault {
+impl<'a> Vault<'a> {
+    pub fn open(provider: &'a mut Provider, path: impl Into<PathBuf>) -> Vault<'a> {
         let path = path.into();
-        let mut vault = Vault {
+        let vault_id = Provider::load_block_id_from_file(path.clone());
+        let vault_block = provider.load_block_from_file(vault_id, 0);
+        let mut vault_block = InfoBlock::from(vault_block);
+
+        let (root_id, index_id) = vault_block.get_root_id_and_index_id();
+
+        let root_block = provider.load_block_from_file(root_id, 0);
+        let index_block = provider.load_block_from_file(index_id, 0);
+
+        let root_block = InfoBlock::from(provider.get_block(root_id));
+        let index_block = InfoBlock::from(provider.get_block(index_id));
+
+        Vault {
             path,
-            files: Vec::new(),
-        };
-        if let Ok(data) = fs::read_to_string(&vault.path) {
-            vault.deserialize(data);
+            //provider,
+            root: root_block,
+            index: index_block,
         }
-        vault
     }
 
-    pub fn close(&self) {
-        fs::write(&self.path, self.serialize()).unwrap();
-    }
+    pub fn initialize(provider: &'a mut Provider, path: impl Into<PathBuf>) -> Vault<'a> {
+        let path = path.into();
 
-    fn serialize(&self) -> String {
-        self.files
-            .iter()
-            .map(|f| f.name.as_str())
-            .collect::<Vec<&str>>()
-            .join("\n")
-    }
+        // Initialize the root block
+        let root_block = InfoBlock::new_directory();
+        let encrypted_root_block = EncryptedBlock::encrypt(&root_block, 0);
+        let root_id = encrypted_root_block.id(BlockKind::Info);
+        provider.add_block(root_id, encrypted_root_block, root_block);
 
-    fn deserialize(&mut self, data: String) {
-        self.files = data
-            .split('\n')
-            .filter(|s| !s.is_empty())
-            .map(|s| File {
-                name: String::from(s),
-                data: Vec::new(),
-            })
-            .collect();
+        // Initialize the index block
+        let index_block = InfoBlock::new_index();
+        let encrypted_index_block = EncryptedBlock::encrypt(&index_block, 0);
+        let index_id = encrypted_index_block.id(BlockKind::Info);
+        provider.add_block(index_id, encrypted_index_block, index_block);
+
+        // Initialize the vault block
+        let vault_block = InfoBlock::new_vault(root_id, index_id);
+        let encrypted_vault_block = EncryptedBlock::encrypt(&vault_block, 0);
+        let vault_id = encrypted_vault_block.id(BlockKind::Info);
+        provider.add_block(vault_id, encrypted_vault_block, vault_block);
+
+        // Get the blocks
+        let root_block = InfoBlock::from(provider.get_block(root_id));
+        let index_block = InfoBlock::from(provider.get_block(index_id));
+        //let vault_block = InfoBlock::from(provider.get_block(vault_id));
+
+        Provider::save_block_id_to_file(vault_id, path.clone());
+
+        Vault {
+            path,
+            //provider,
+            root: root_block,
+            index: index_block,
+        }
     }
 
     pub fn put(&mut self, name: &str) -> Result<&File, io::Error> {
+        /*
         let p = Path::new(name);
         let f = File::from_os(p)?;
         // The eventual .last().unwrap() is critically depending on the .push()
         self.files.push(f);
         Ok(self.files.last().unwrap())
+        */
+        Err(io::Error::new(io::ErrorKind::Other, "foobar"))
+    }
+
+    pub fn create_directory(&mut self, name: &str) {
+        let block = self.root.create(name, NodeKind::Directory);
+        let encrypted_block = EncryptedBlock::encrypt(&block, 0);
+        let block_id = encrypted_block.id(BlockKind::Info);
+
+        // TODO: self.provider.add_block
+
+        // TODO: Update also reference in vault block, and update vault block id in the file
+
+        //fs::write(&self.path, data).unwrap();
     }
 
     pub fn get(&self, name: &str) -> Option<&File> {
-        self.files.iter().find(|&f| f.name == name)
+        None
     }
 
-    pub fn list(&self) -> Vec<&str> {
-        self.files.iter().map(|f| f.name.as_str()).collect()
-    }
-}
-
-impl Drop for Vault {
-    fn drop(&mut self) {
-        self.close();
+    pub fn list(&mut self) -> Vec<(NodeKind, &str)> {
+        self.root.directory_list(0)
     }
 }

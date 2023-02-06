@@ -9,7 +9,7 @@ struct BlockId {
 
 using ShardId = UInt64;
 
-struct Id {
+struct UnionId {
 	union {
 		localId @0: UInt16; # Max 65536 local entries
 		blockId @1: BlockId; # TODO: Add key
@@ -51,8 +51,8 @@ struct Node {
 	# TODO: POSIX user id, group id, mode, timestamps
 
 	struct Vault {
-		root @0: Id;
-		index @1: Id;
+		root @0: UnionId;
+		index @1: UnionId;
 	}
 
 	struct Directory {
@@ -60,13 +60,13 @@ struct Node {
 
 		struct Entry {
 			name @0: Text;
-			id @1: Id;
+			id @1: UnionId;
 		}
 	}
 
 	struct File {
 		size @0: UInt64;
-		id @1: List(Id); # List(Id), because File data could be 7 blocks, and their block ids would be listed here.
+		id @1: List(UnionId); # List, because File data could be 7 blocks, and their block ids would be listed here.
 	}
 }
 

@@ -19,14 +19,14 @@
 
 use std::io;
 
-use vault::{File, Vault};
+use vault::{File, NodeKind, Provider, Vault};
 
 pub struct TaskManager<'a> {
-    vault: &'a mut Vault,
+    vault: &'a mut Vault<'a>,
 }
 
 impl<'a> TaskManager<'a> {
-    pub fn new(vault: &mut Vault) -> TaskManager {
+    pub fn new(vault: &'a mut Vault<'a>) -> TaskManager<'a> {
         TaskManager { vault }
     }
 
@@ -38,7 +38,15 @@ impl<'a> TaskManager<'a> {
         self.vault.get(s)
     }
 
-    pub fn list(&self) -> Vec<&str> {
+    pub fn create_directory(&mut self, s: &str) {
+        self.vault.create_directory(s);
+    }
+
+    pub fn init(provider: &mut Provider, name: &str) {
+        Vault::initialize(provider, name);
+    }
+
+    pub fn list(&mut self) -> Vec<(NodeKind, &str)> {
         self.vault.list()
     }
 }
