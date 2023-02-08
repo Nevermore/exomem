@@ -46,9 +46,7 @@ impl VaultPath {
     }
 
     pub fn parent(&self) -> Option<VaultPath> {
-        self.path
-            .parent()
-            .map(|path| VaultPath::new_unchecked(path))
+        self.path.parent().map(VaultPath::new_unchecked)
     }
 
     pub fn to_str(&self) -> Option<&str> {

@@ -21,9 +21,6 @@ use std::io;
 use std::path::Component;
 use std::path::PathBuf;
 
-use crate::file;
-use crate::vault_capnp::node::directory::entry;
-use crate::Block;
 use crate::BlockId;
 use crate::BlockKind;
 use crate::EncryptedBlock;
@@ -71,15 +68,12 @@ impl<'a> Vault<'a> {
 
         // Initialize the root block
         let root_block = InfoBlock::new_directory();
-        let (root_block, _) =
-            root_block
-                .info()
-                .directory_create_local_node(0, "welcome", NodeKind::Directory);
+        let (root_block, _) = root_block
+            .info()
+            .directory_create_local_node(0, "welcome", NodeKind::Directory);
         let encrypted_root_block = EncryptedBlock::encrypt(&root_block, 0);
         let root_id = encrypted_root_block.id(BlockKind::Info);
-        let root_block = provider
-            .add_block(root_id, encrypted_root_block, root_block)
-            .info();
+        let root_block = provider.add_block(root_id, encrypted_root_block, root_block).info();
 
         println!("Initialized root  block {}", root_id.base64());
 
@@ -87,9 +81,7 @@ impl<'a> Vault<'a> {
         let index_block = InfoBlock::new_index();
         let encrypted_index_block = EncryptedBlock::encrypt(&index_block, 0);
         let index_id = encrypted_index_block.id(BlockKind::Info);
-        let index_block = provider
-            .add_block(index_id, encrypted_index_block, index_block)
-            .info();
+        let index_block = provider.add_block(index_id, encrypted_index_block, index_block).info();
 
         println!("Initialized index block {}", index_id.base64());
 
@@ -97,9 +89,7 @@ impl<'a> Vault<'a> {
         let vault_block = InfoBlock::new_vault(root_id, index_id);
         let encrypted_vault_block = EncryptedBlock::encrypt(&vault_block, 0);
         let vault_id = encrypted_vault_block.id(BlockKind::Info);
-        let vault_block = provider
-            .add_block(vault_id, encrypted_vault_block, vault_block)
-            .info();
+        let vault_block = provider.add_block(vault_id, encrypted_vault_block, vault_block).info();
 
         println!("Initialized vault block {}", vault_id.base64());
 
@@ -164,18 +154,11 @@ impl<'a> Vault<'a> {
                         node_indexes.push(node_index);
                     } else {
                         // It doesn't exist, so create the directory and continue the loop
-                        let (new_block, entry_node_index) = block.directory_create_local_node(
-                            node_index,
-                            entry_name,
-                            NodeKind::Directory,
-                        );
+                        let (new_block, entry_node_index) =
+                            block.directory_create_local_node(node_index, entry_name, NodeKind::Directory);
 
                         // Update the parent block
-                        *blocks
-                            .iter_mut()
-                            .rev()
-                            .find(|block| block.is_some())
-                            .unwrap() = Some(new_block);
+                        *blocks.iter_mut().rev().find(|block| block.is_some()).unwrap() = Some(new_block);
                         blocks.push(None); // We use the parent's block
                         node_indexes.push(entry_node_index);
                         created_anything = true;
@@ -199,28 +182,21 @@ impl<'a> Vault<'a> {
                 let name = entry_names[i];
 
                 if let Some(block) = block {
-                    if let (Some(entry_node_index), Some(entry_name)) =
-                        (entry_node_index, entry_name)
-                    {
+                    if let (Some(entry_node_index), Some(entry_name)) = (entry_node_index, entry_name) {
                         // Make sure the entry is pointing to this
-                        if let Some(new_block) =
-                            block.info().directory_set_entry_block_id_and_node_index(
-                                node_index,
-                                entry_name,
-                                entry_block_id.as_ref(),
-                                entry_node_index,
-                            )
-                        {
+                        if let Some(new_block) = block.info().directory_set_entry_block_id_and_node_index(
+                            node_index,
+                            entry_name,
+                            entry_block_id.as_ref(),
+                            entry_node_index,
+                        ) {
                             *block = new_block;
                         }
                     }
 
                     let encrypted_block = EncryptedBlock::encrypt(block, 0);
                     let block_id = encrypted_block.id(BlockKind::Info);
-                    let block = self
-                        .provider
-                        .add_block(block_id, encrypted_block, block.clone())
-                        .info();
+                    let block = self.provider.add_block(block_id, encrypted_block, block.clone()).info();
                     println!("Created a new dir   block {}", block_id.base64());
 
                     entry_block = Some(block);
@@ -261,23 +237,18 @@ impl<'a> Vault<'a> {
         if let Some(parent_path) = path.parent() {
             // Get that directory's block id and node index
             // TODO: Perhaps better performance to check here if parent is root, and then immediately use self.root
-            let (parent_block_id, parent_node_index) =
-                self.get_path_block_id_and_node_index(parent_path);
+            let (parent_block_id, parent_node_index) = self.get_path_block_id_and_node_index(parent_path);
 
             let parent_block = self.provider.get_block(parent_block_id).info();
 
             let file_name = path.file_name().unwrap();
-            if let Some((block_id, node_index)) = parent_block
-                .directory_get_entry_block_id_and_node_index(parent_node_index, file_name)
+            if let Some((block_id, node_index)) =
+                parent_block.directory_get_entry_block_id_and_node_index(parent_node_index, file_name)
             {
                 let block_id = block_id.unwrap_or(parent_block_id);
                 return (block_id, node_index);
             } else {
-                panic!(
-                    "No such entry: {:?} in {:?}",
-                    file_name,
-                    path.parent().unwrap()
-                );
+                panic!("No such entry: {:?} in {:?}", file_name, path.parent().unwrap());
             }
         }
         // Root node
@@ -285,7 +256,6 @@ impl<'a> Vault<'a> {
     }
 
     pub fn list(&self, path: VaultPath) -> Vec<(NodeKind, String)> {
-        let path = path.into();
         let (block_id, node_index) = self.get_path_block_id_and_node_index(path);
         let list_block = self.provider.get_block(block_id).info();
         list_block

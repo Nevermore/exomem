@@ -33,10 +33,7 @@ impl File {
         }
         let name = path
             .file_name()
-            .ok_or(Error::new(
-                ErrorKind::InvalidInput,
-                "Can't determine file name.",
-            ))?
+            .ok_or(Error::new(ErrorKind::InvalidInput, "Can't determine file name."))?
             .to_str()
             .ok_or(Error::new(
                 ErrorKind::InvalidInput,

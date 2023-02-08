@@ -41,9 +41,7 @@ pub struct BlockId {
 impl BlockId {
     /// Create a new `BlockId` from the provided `hash` and options.
     pub fn new(hash: blake3::Hash, size: usize, has_header: bool) -> BlockId {
-        let mut id = BlockId {
-            data: *hash.as_bytes(),
-        };
+        let mut id = BlockId { data: *hash.as_bytes() };
         id.set_header(size, has_header);
         id
     }
@@ -448,12 +446,7 @@ impl InfoBlock {
     /// Creates a new node of `kind` with `name`.
     ///
     /// Returns the new [`Block`] that contains the newly created inlined node, as well as the local id of that node.
-    pub fn directory_create_local_node(
-        &self,
-        directory_node_idx: u32,
-        name: &str,
-        kind: NodeKind,
-    ) -> (Block, u32) {
+    pub fn directory_create_local_node(&self, directory_node_idx: u32, name: &str, kind: NodeKind) -> (Block, u32) {
         let block_r = self.block_reader();
         let nodes_r = block_r.get_nodes().unwrap();
         let old_nodes_len = nodes_r.len();
@@ -598,9 +591,7 @@ impl InfoBlock {
                 assert!(entry_r.has_id());
                 let id_r = entry_r.get_id().expect("failed to get id");
                 let id_matches = match id_r.which().expect("failed to get readable id") {
-                    union_id::Which::LocalId(local_id) => {
-                        block_id.is_none() && local_id == node_index
-                    }
+                    union_id::Which::LocalId(local_id) => block_id.is_none() && local_id == node_index,
                     union_id::Which::BlockId(block_id_r) => {
                         let block_id_r = block_id_r.unwrap();
                         let d1 = block_id_r.get_d1().to_le_bytes();
@@ -641,16 +632,10 @@ impl InfoBlock {
 
                     if let Some(block_id) = block_id {
                         let mut block_id_b = id_b.init_block_id();
-                        block_id_b
-                            .set_d1(u64::from_le_bytes(block_id.data[0..8].try_into().unwrap()));
-                        block_id_b
-                            .set_d2(u64::from_le_bytes(block_id.data[8..16].try_into().unwrap()));
-                        block_id_b.set_d3(u64::from_le_bytes(
-                            block_id.data[16..24].try_into().unwrap(),
-                        ));
-                        block_id_b.set_d4(u64::from_le_bytes(
-                            block_id.data[24..32].try_into().unwrap(),
-                        ));
+                        block_id_b.set_d1(u64::from_le_bytes(block_id.data[0..8].try_into().unwrap()));
+                        block_id_b.set_d2(u64::from_le_bytes(block_id.data[8..16].try_into().unwrap()));
+                        block_id_b.set_d3(u64::from_le_bytes(block_id.data[16..24].try_into().unwrap()));
+                        block_id_b.set_d4(u64::from_le_bytes(block_id.data[24..32].try_into().unwrap()));
                     } else {
                         id_b.set_local_id(node_index);
                     }
