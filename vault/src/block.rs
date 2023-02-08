@@ -24,6 +24,8 @@ use capnp::message::{self, ReaderOptions, ReaderSegments, TypedBuilder};
 
 use crate::vault_capnp::{block, index, node, union_id, NodeKind};
 
+// TODO: Create UnionId? LocalId tracking is getting out of hand
+
 /// `BlockId` is a globally unique 256 bit identifier for [`Block`].
 ///
 /// It also contains a header with some information about the block.
@@ -445,12 +447,17 @@ impl InfoBlock {
 
     /// Creates a new node of `kind` with `name`.
     ///
-    /// Returns the new [`Block`].
-    pub fn create(&self, name: &str, kind: NodeKind) -> Block {
+    /// Returns the new [`Block`] that contains the newly created inlined node, as well as the local id of that node.
+    pub fn directory_create_local_node(
+        &self,
+        directory_node_idx: u32,
+        name: &str,
+        kind: NodeKind,
+    ) -> (Block, u32) {
         let block_r = self.block_reader();
         let nodes_r = block_r.get_nodes().unwrap();
         let old_nodes_len = nodes_r.len();
-        let node_r = nodes_r.get(0);
+        let node_r = nodes_r.get(directory_node_idx);
 
         let node::Directory(directory_r) = node_r.which().unwrap() else {
             panic!("Unexpected node");
@@ -458,7 +465,7 @@ impl InfoBlock {
         let directory_r = directory_r.unwrap();
 
         let entries_r = directory_r.get_entries().unwrap();
-        let old_len = entries_r.len();
+        let old_entries_len = entries_r.len();
 
         let mut message_b = TypedBuilder::<block::Owned>::new_default();
         message_b.set_root(block_r).unwrap();
@@ -471,7 +478,7 @@ impl InfoBlock {
             nodes_b.set_with_caveats(i, old_node).unwrap();
         }
 
-        let node_b = nodes_b.reborrow().get(0);
+        let node_b = nodes_b.reborrow().get(directory_node_idx);
 
         let directory_b = match node_b.which().unwrap() {
             node::Directory(directory_b) => directory_b,
@@ -480,29 +487,29 @@ impl InfoBlock {
         };
         let directory_b = directory_b.unwrap();
 
-        let mut entries = directory_b.init_entries(old_len + 1);
-        for i in 0..old_len {
-            let old_entry = entries_r.reborrow().get(i);
-            entries.set_with_caveats(i, old_entry).unwrap();
+        let mut entries_b = directory_b.init_entries(old_entries_len + 1);
+        for i in 0..old_entries_len {
+            let old_entry_r = entries_r.reborrow().get(i);
+            entries_b.set_with_caveats(i, old_entry_r).unwrap();
         }
 
-        let mut entry = entries.reborrow().get(old_len);
-        entry.set_name(name);
+        let mut entry_b = entries_b.reborrow().get(old_entries_len);
+        entry_b.set_name(name);
 
         // TODO: Add ability to create this new node in a brand new block instead, and then reference it with blockId
-        let mut id = entry.init_id();
+        let mut id_b = entry_b.init_id();
         let next_local_id = old_nodes_len;
-        id.set_local_id(next_local_id as u16); // TODO: Make sure we're not truncating
+        id_b.set_local_id(next_local_id as u16); // TODO: Make sure we're not truncating
 
-        let inline_node = nodes_b.get(next_local_id);
+        let inline_node_b = nodes_b.get(next_local_id);
         match kind {
             NodeKind::Directory => {
-                let directory = inline_node.init_directory();
-                directory.init_entries(0);
+                let directory_b = inline_node_b.init_directory();
+                directory_b.init_entries(0);
             }
             NodeKind::File => {
-                let mut file = inline_node.init_file();
-                file.set_size(1234);
+                let mut file_b = inline_node_b.init_file();
+                file_b.set_size(1234);
                 // TODO: Set id
             }
             NodeKind::Vault => {
@@ -517,7 +524,149 @@ impl InfoBlock {
             }
         };
 
-        Block::from_data(segment)
+        (Block::from_data(segment), next_local_id)
+    }
+
+    pub fn directory_get_entry_block_id_and_node_index(
+        &self,
+        directory_node_idx: u32,
+        entry_name: &str,
+    ) -> Option<(Option<BlockId>, u32)> {
+        let block_r = self.block_reader();
+        let nodes_r = block_r.get_nodes().unwrap();
+        let node_r = nodes_r.get(directory_node_idx);
+
+        let node::Directory(directory_r) = node_r.which().unwrap() else {
+            panic!("Unexpected node");
+        };
+        let directory_r = directory_r.unwrap();
+
+        let entries_r = directory_r.get_entries().unwrap();
+        for entry_r in entries_r.iter() {
+            let name = entry_r.get_name().unwrap();
+            if name == entry_name {
+                assert!(entry_r.has_id());
+                let id_r = entry_r.get_id().expect("failed to get id");
+                match id_r.which().expect("failed to get readable id") {
+                    union_id::Which::LocalId(local_id) => {
+                        return Some((None, local_id as u32));
+                    }
+                    union_id::Which::BlockId(block_id_r) => {
+                        let block_id_r = block_id_r.unwrap();
+                        let d1 = block_id_r.get_d1().to_le_bytes();
+                        let d2 = block_id_r.get_d2().to_le_bytes();
+                        let d3 = block_id_r.get_d3().to_le_bytes();
+                        let d4 = block_id_r.get_d4().to_le_bytes();
+
+                        // TODO: capnp::raw::get_struct_data_section better?
+
+                        let mut result = [0; 32];
+                        result[0..8].copy_from_slice(&d1);
+                        result[8..16].copy_from_slice(&d2);
+                        result[16..24].copy_from_slice(&d3);
+                        result[24..32].copy_from_slice(&d4);
+
+                        return Some((Some(BlockId::from_data(result)), 0));
+                    }
+                    union_id::Which::ShardId(_) => unimplemented!(),
+                }
+            }
+        }
+        None
+    }
+
+    pub fn directory_set_entry_block_id_and_node_index(
+        &self,
+        directory_node_idx: u32,
+        entry_name: &str,
+        block_id: Option<&BlockId>,
+        node_index: u16,
+    ) -> Option<Block> {
+        let block_r = self.block_reader();
+        let nodes_r = block_r.get_nodes().unwrap();
+        let node_r = nodes_r.get(directory_node_idx);
+
+        let node::Directory(directory_r) = node_r.which().unwrap() else {
+            panic!("Unexpected node");
+        };
+        let directory_r = directory_r.unwrap();
+
+        let entries_r = directory_r.get_entries().unwrap();
+        for (entry_idx, entry_r) in entries_r.iter().enumerate() {
+            let name = entry_r.get_name().unwrap();
+            if name == entry_name {
+                assert!(entry_r.has_id());
+                let id_r = entry_r.get_id().expect("failed to get id");
+                let id_matches = match id_r.which().expect("failed to get readable id") {
+                    union_id::Which::LocalId(local_id) => {
+                        block_id.is_none() && local_id == node_index
+                    }
+                    union_id::Which::BlockId(block_id_r) => {
+                        let block_id_r = block_id_r.unwrap();
+                        let d1 = block_id_r.get_d1().to_le_bytes();
+                        let d2 = block_id_r.get_d2().to_le_bytes();
+                        let d3 = block_id_r.get_d3().to_le_bytes();
+                        let d4 = block_id_r.get_d4().to_le_bytes();
+
+                        // TODO: capnp::raw::get_struct_data_section better?
+
+                        let mut result = [0; 32];
+                        result[0..8].copy_from_slice(&d1);
+                        result[8..16].copy_from_slice(&d2);
+                        result[16..24].copy_from_slice(&d3);
+                        result[24..32].copy_from_slice(&d4);
+
+                        let current_block_id = BlockId::from_data(result);
+
+                        block_id.is_some() && *block_id.unwrap() == current_block_id
+                    }
+                    union_id::Which::ShardId(_) => unimplemented!(),
+                };
+                if !id_matches {
+                    let mut message_b = TypedBuilder::<block::Owned>::new_default();
+                    message_b.set_root(block_r).unwrap();
+                    let block_b = message_b.get_root().unwrap();
+
+                    let nodes_b = block_b.get_nodes().unwrap();
+                    let node_b = nodes_b.get(directory_node_idx);
+
+                    let node::Directory(directory_b) = node_b.which().unwrap() else {
+                        panic!("Unexpected node");
+                    };
+                    let directory_b = directory_b.unwrap();
+
+                    let entries_b = directory_b.get_entries().unwrap();
+                    let entry_b = entries_b.get(entry_idx as u32);
+                    let mut id_b = entry_b.init_id();
+
+                    if let Some(block_id) = block_id {
+                        let mut block_id_b = id_b.init_block_id();
+                        block_id_b
+                            .set_d1(u64::from_le_bytes(block_id.data[0..8].try_into().unwrap()));
+                        block_id_b
+                            .set_d2(u64::from_le_bytes(block_id.data[8..16].try_into().unwrap()));
+                        block_id_b.set_d3(u64::from_le_bytes(
+                            block_id.data[16..24].try_into().unwrap(),
+                        ));
+                        block_id_b.set_d4(u64::from_le_bytes(
+                            block_id.data[24..32].try_into().unwrap(),
+                        ));
+                    } else {
+                        id_b.set_local_id(node_index);
+                    }
+
+                    let segment = match message_b.borrow_inner().get_segments_for_output() {
+                        capnp::OutputSegments::SingleSegment(ss) => Bytes::copy_from_slice(ss[0]),
+                        capnp::OutputSegments::MultiSegment(_) => {
+                            panic!("got multiple output segments, but our reader doesn't want that")
+                        }
+                    };
+
+                    return Some(Block::from_data(segment));
+                }
+            }
+        }
+        None
     }
 
     pub fn directory_list(&self, node_idx: u32) -> Vec<(NodeKind, &str)> {

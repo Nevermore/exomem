@@ -19,7 +19,7 @@
 
 use std::{io, path::PathBuf};
 
-use vault::{File, NodeKind, Provider, Vault};
+use vault::{File, NodeKind, Provider, Vault, VaultPath};
 
 pub struct TaskManager<'a> {
     vault: &'a mut Vault<'a>,
@@ -38,15 +38,17 @@ impl<'a> TaskManager<'a> {
         self.vault.get(s)
     }
 
-    pub fn create_directory(&mut self, s: &str) {
-        self.vault.create_directory(s);
+    pub fn create_directory(&mut self, path: impl Into<PathBuf>) {
+        let path = VaultPath::new(path);
+        self.vault.create_directory(path);
     }
 
     pub fn init(provider: &Provider, name: &str) {
         Vault::initialize(provider, name);
     }
 
-    pub fn list(&mut self, path: impl Into<PathBuf>) -> Vec<(NodeKind, &str)> {
+    pub fn list(&mut self, path: impl Into<PathBuf>) -> Vec<(NodeKind, String)> {
+        let path = VaultPath::new(path);
         self.vault.list(path)
     }
 }

@@ -133,8 +133,8 @@ impl<'a> TaskRunner<'a> {
     }
 
     /// Create a directory.
-    fn create_directory(&mut self, name: &str) {
-        self.task_manager.create_directory(name);
+    fn create_directory(&mut self, path: &str) {
+        self.task_manager.create_directory(path);
         /*
         match self.task_manager.create_directory(name) {
             Ok(f) => println!("Created: {}", f.name),

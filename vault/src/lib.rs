@@ -20,6 +20,7 @@
 mod block;
 mod file;
 mod node;
+mod path;
 mod provider;
 mod shard;
 mod vault;
@@ -30,6 +31,7 @@ mod vault_capnp;
 pub use block::*;
 pub use file::*;
 pub use node::*;
+pub use path::*;
 pub use provider::*;
 pub use shard::*;
 pub use vault::*;
