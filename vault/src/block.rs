@@ -20,9 +20,12 @@
 use std::fmt;
 
 use bytes::Bytes;
-use capnp::message::{self, ReaderOptions, ReaderSegments, TypedBuilder};
+use capnp::{
+    message::{self, ReaderOptions, ReaderSegments, TypedBuilder},
+    raw::get_struct_data_section,
+};
 
-use crate::vault_capnp::{block, index, node, union_id, NodeKind};
+use crate::vault_capnp::{block, block_id, index, node, union_id, NodeKind};
 
 // TODO: Create UnionId? LocalId tracking is getting out of hand
 
@@ -49,6 +52,20 @@ impl BlockId {
     /// Create a new `BlockId` from raw `data`.
     pub fn from_data(data: [u8; 32]) -> BlockId {
         BlockId { data }
+    }
+
+    pub fn from_reader(block_id_r: block_id::Reader) -> BlockId {
+        let mut data = [0; 32];
+        // TODO: Check length before hand to not panic?
+        data.copy_from_slice(get_struct_data_section(block_id_r));
+        BlockId { data }
+    }
+
+    pub fn to_builder(&self, mut block_id_b: block_id::Builder) {
+        block_id_b.set_d1(u64::from_le_bytes(self.data[0..8].try_into().unwrap()));
+        block_id_b.set_d2(u64::from_le_bytes(self.data[8..16].try_into().unwrap()));
+        block_id_b.set_d3(u64::from_le_bytes(self.data[16..24].try_into().unwrap()));
+        block_id_b.set_d4(u64::from_le_bytes(self.data[24..32].try_into().unwrap()));
     }
 
     // TODO: Write tests for this at every size
@@ -281,24 +298,16 @@ impl From<Block> for InfoBlock {
 }
 
 impl InfoBlock {
-    pub fn new_vault(root: BlockId, index: BlockId) -> Block {
+    pub fn new_vault(root_id: BlockId, index_id: BlockId) -> Block {
         let mut message_b = TypedBuilder::<block::Owned>::new_default(); // TODO: Look into allocation strategies
         let block_b = message_b.init_root();
         let nodes_b = block_b.init_nodes(1);
         let node_b = nodes_b.get(0);
         let mut vault_b = node_b.init_vault();
         let root_b = vault_b.reborrow().init_root();
-        let mut root_block_id_b = root_b.init_block_id();
-        root_block_id_b.set_d1(u64::from_le_bytes(root.data[0..8].try_into().unwrap()));
-        root_block_id_b.set_d2(u64::from_le_bytes(root.data[8..16].try_into().unwrap()));
-        root_block_id_b.set_d3(u64::from_le_bytes(root.data[16..24].try_into().unwrap()));
-        root_block_id_b.set_d4(u64::from_le_bytes(root.data[24..32].try_into().unwrap()));
+        root_id.to_builder(root_b.init_block_id());
         let index_b = vault_b.init_index();
-        let mut index_block_id_b = index_b.init_block_id();
-        index_block_id_b.set_d1(u64::from_le_bytes(index.data[0..8].try_into().unwrap()));
-        index_block_id_b.set_d2(u64::from_le_bytes(index.data[8..16].try_into().unwrap()));
-        index_block_id_b.set_d3(u64::from_le_bytes(index.data[16..24].try_into().unwrap()));
-        index_block_id_b.set_d4(u64::from_le_bytes(index.data[24..32].try_into().unwrap()));
+        index_id.to_builder(index_b.init_block_id());
 
         let segment = match message_b.borrow_inner().get_segments_for_output() {
             capnp::OutputSegments::SingleSegment(ss) => Bytes::copy_from_slice(ss[0]),
@@ -371,20 +380,7 @@ impl InfoBlock {
             union_id::Which::LocalId(_) => todo!(),
             union_id::Which::BlockId(block_id_r) => {
                 let block_id_r = block_id_r.unwrap();
-                let d1 = block_id_r.get_d1().to_le_bytes();
-                let d2 = block_id_r.get_d2().to_le_bytes();
-                let d3 = block_id_r.get_d3().to_le_bytes();
-                let d4 = block_id_r.get_d4().to_le_bytes();
-
-                // TODO: capnp::raw::get_struct_data_section better?
-
-                let mut result = [0; 32];
-                result[0..8].copy_from_slice(&d1);
-                result[8..16].copy_from_slice(&d2);
-                result[16..24].copy_from_slice(&d3);
-                result[24..32].copy_from_slice(&d4);
-
-                BlockId::from_data(result)
+                BlockId::from_reader(block_id_r)
             }
             union_id::Which::ShardId(_) => todo!(),
         };
@@ -394,18 +390,7 @@ impl InfoBlock {
             union_id::Which::LocalId(_) => todo!(),
             union_id::Which::BlockId(block_id_r) => {
                 let block_id_r = block_id_r.unwrap();
-                let d1 = block_id_r.get_d1().to_le_bytes();
-                let d2 = block_id_r.get_d2().to_le_bytes();
-                let d3 = block_id_r.get_d3().to_le_bytes();
-                let d4 = block_id_r.get_d4().to_le_bytes();
-
-                let mut result = [0; 32];
-                result[0..8].copy_from_slice(&d1);
-                result[8..16].copy_from_slice(&d2);
-                result[16..24].copy_from_slice(&d3);
-                result[24..32].copy_from_slice(&d4);
-
-                BlockId::from_data(result)
+                BlockId::from_reader(block_id_r)
             }
             union_id::Which::ShardId(_) => todo!(),
         };
@@ -413,7 +398,7 @@ impl InfoBlock {
         (root_id, index_id)
     }
 
-    pub fn update_root_id(&self, id: BlockId) -> Block {
+    pub fn update_root_id(&self, block_id: BlockId) -> Block {
         let block_r = self.block_reader();
 
         let mut message_b = TypedBuilder::<block::Owned>::new_default();
@@ -427,11 +412,7 @@ impl InfoBlock {
         };
         let vault_b = vault_b.unwrap();
         let root_b = vault_b.init_root();
-        let mut root_block_id_b = root_b.init_block_id();
-        root_block_id_b.set_d1(u64::from_le_bytes(id.data[0..8].try_into().unwrap()));
-        root_block_id_b.set_d2(u64::from_le_bytes(id.data[8..16].try_into().unwrap()));
-        root_block_id_b.set_d3(u64::from_le_bytes(id.data[16..24].try_into().unwrap()));
-        root_block_id_b.set_d4(u64::from_le_bytes(id.data[24..32].try_into().unwrap()));
+        block_id.to_builder(root_b.init_block_id());
 
         let segment = match message_b.borrow_inner().get_segments_for_output() {
             capnp::OutputSegments::SingleSegment(ss) => Bytes::copy_from_slice(ss[0]),
@@ -546,20 +527,8 @@ impl InfoBlock {
                     }
                     union_id::Which::BlockId(block_id_r) => {
                         let block_id_r = block_id_r.unwrap();
-                        let d1 = block_id_r.get_d1().to_le_bytes();
-                        let d2 = block_id_r.get_d2().to_le_bytes();
-                        let d3 = block_id_r.get_d3().to_le_bytes();
-                        let d4 = block_id_r.get_d4().to_le_bytes();
-
-                        // TODO: capnp::raw::get_struct_data_section better?
-
-                        let mut result = [0; 32];
-                        result[0..8].copy_from_slice(&d1);
-                        result[8..16].copy_from_slice(&d2);
-                        result[16..24].copy_from_slice(&d3);
-                        result[24..32].copy_from_slice(&d4);
-
-                        return Some((Some(BlockId::from_data(result)), 0));
+                        let block_id = BlockId::from_reader(block_id_r);
+                        return Some((Some(block_id), 0));
                     }
                     union_id::Which::ShardId(_) => unimplemented!(),
                 }
@@ -594,21 +563,7 @@ impl InfoBlock {
                     union_id::Which::LocalId(local_id) => block_id.is_none() && local_id == node_index,
                     union_id::Which::BlockId(block_id_r) => {
                         let block_id_r = block_id_r.unwrap();
-                        let d1 = block_id_r.get_d1().to_le_bytes();
-                        let d2 = block_id_r.get_d2().to_le_bytes();
-                        let d3 = block_id_r.get_d3().to_le_bytes();
-                        let d4 = block_id_r.get_d4().to_le_bytes();
-
-                        // TODO: capnp::raw::get_struct_data_section better?
-
-                        let mut result = [0; 32];
-                        result[0..8].copy_from_slice(&d1);
-                        result[8..16].copy_from_slice(&d2);
-                        result[16..24].copy_from_slice(&d3);
-                        result[24..32].copy_from_slice(&d4);
-
-                        let current_block_id = BlockId::from_data(result);
-
+                        let current_block_id = BlockId::from_reader(block_id_r);
                         block_id.is_some() && *block_id.unwrap() == current_block_id
                     }
                     union_id::Which::ShardId(_) => unimplemented!(),
@@ -631,11 +586,7 @@ impl InfoBlock {
                     let mut id_b = entry_b.init_id();
 
                     if let Some(block_id) = block_id {
-                        let mut block_id_b = id_b.init_block_id();
-                        block_id_b.set_d1(u64::from_le_bytes(block_id.data[0..8].try_into().unwrap()));
-                        block_id_b.set_d2(u64::from_le_bytes(block_id.data[8..16].try_into().unwrap()));
-                        block_id_b.set_d3(u64::from_le_bytes(block_id.data[16..24].try_into().unwrap()));
-                        block_id_b.set_d4(u64::from_le_bytes(block_id.data[24..32].try_into().unwrap()));
+                        block_id.to_builder(id_b.init_block_id());
                     } else {
                         id_b.set_local_id(node_index);
                     }
