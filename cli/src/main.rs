@@ -41,22 +41,22 @@ enum Commands {
     /// Get a file.
     Get {
         /// The file to get.
-        name: String,
+        path: String,
     },
     /// Put a file.
     Put {
         /// The file to put.
-        name: String,
+        path: String,
     },
     /// Create a directory.
     Mkdir {
-        /// The name of the directory to create.
-        name: String,
+        /// The path of the directory to create.
+        path: String,
     },
     /// Initialize state.
     Init {
-        /// The name of the state file.
-        name: String,
+        /// The path of the state file.
+        path: String,
     },
 }
 
@@ -64,8 +64,8 @@ fn main() {
     let cli = Cli::parse();
     let provider = Provider::new();
 
-    if let Commands::Init { name } = &cli.command {
-        TaskRunner::init(&provider, name);
+    if let Commands::Init { path } = &cli.command {
+        TaskRunner::init(&provider, path);
         return;
     }
 
@@ -74,9 +74,9 @@ fn main() {
 
     match &cli.command {
         Commands::List { path } => task_runner.list(path),
-        Commands::Get { name } => task_runner.get(name),
-        Commands::Put { name } => task_runner.put(name),
-        Commands::Mkdir { name } => task_runner.create_directory(name),
+        Commands::Get { path } => task_runner.get(path),
+        Commands::Put { path } => task_runner.put(path),
+        Commands::Mkdir { path } => task_runner.create_directory(path),
         Commands::Init { .. } => unreachable!(),
     }
 }
@@ -128,8 +128,8 @@ impl<'a> TaskRunner<'a> {
         }
     }
 
-    fn init(provider: &Provider, name: &str) {
-        TaskManager::init(provider, name);
+    fn init(provider: &Provider, path: &str) {
+        TaskManager::init(provider, path);
     }
 
     /// Create a directory.

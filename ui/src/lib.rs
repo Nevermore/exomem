@@ -43,8 +43,8 @@ impl<'a> TaskManager<'a> {
         self.vault.create_directory(path);
     }
 
-    pub fn init(provider: &Provider, name: &str) {
-        Vault::initialize(provider, name);
+    pub fn init(provider: &Provider, path: &str) {
+        Vault::initialize(provider, path);
     }
 
     pub fn list(&mut self, path: impl Into<PathBuf>) -> Vec<(NodeKind, String)> {

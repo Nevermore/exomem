@@ -54,6 +54,7 @@ impl BlockId {
         BlockId { data }
     }
 
+    /// Create a new `BlockId` from a capnp reader.
     pub fn from_reader(block_id_r: block_id::Reader) -> BlockId {
         let mut data = [0; 32];
         // TODO: Check length before hand to not panic?
@@ -61,6 +62,7 @@ impl BlockId {
         BlockId { data }
     }
 
+    /// Copy raw `BlockId` data to the specified capnp builder.
     pub fn to_builder(&self, mut block_id_b: block_id::Builder) {
         block_id_b.set_d1(u64::from_le_bytes(self.data[0..8].try_into().unwrap()));
         block_id_b.set_d2(u64::from_le_bytes(self.data[8..16].try_into().unwrap()));
