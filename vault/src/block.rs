@@ -116,12 +116,12 @@ impl BlockId {
 
     /// Returns the block size in number of bytes, in powers of two in the range of 4 KiB - 128 MiB.
     ///
-    /// Check out [`Block::size_from_marker`] for more information.
-    pub fn block_size(&self) -> BlockOffset {
+    /// Check out [`BlockSize::from_marker`] for more information.
+    pub fn block_size(&self) -> BlockSize {
         // The third to sixth least significant bits (4 bits) determine the size.
         let size_marker = (self.data[0] & 0b0011_1100u8) >> 2;
         // Ranges from 4 KiB to 128 MiB.
-        Block::size_from_marker(size_marker)
+        BlockSize::from_marker(size_marker)
     }
 
     /// Returns the Base64 representation of the `BlockId`.
@@ -222,28 +222,6 @@ pub struct Block {
 }
 
 impl Block {
-    /// Returns the block size in number of bytes, in powers of two in the range of 4 KiB - 128 MiB.
-    ///
-    /// The minimum block size of 4 KiB was chosen because it is a very common device sector size.
-    /// This choice helps with great compatability with [Advanced Format]. It is likely to offer
-    /// better performance than smaller block sizes and less likely to get stuck in a device buffer.
-    ///
-    /// The choice of calculating powers of two is because it offers good granularity
-    /// when choosing for future optimizations while ensuring all the sizes are multiples of 4 KiB.
-    ///
-    /// The choice of using 4 bits (16 values) comes because 3 bits would get us only to 512 KiB
-    /// which is not nearly enough for 100 GB files. On the other hand 5 bits would get us all the
-    /// way up to 8 TiB. That block size is prohibitively large for embedded and mobile use.
-    /// Luckily 4 bits gets us to 128 MiB which is quite good for 100 GB files while still being
-    /// managable by embedded and mobile devices.
-    ///
-    /// [Advanced Format]: https://en.wikipedia.org/wiki/Advanced_Format
-    pub fn size_from_marker(size_marker: u8) -> BlockOffset {
-        // 4 bits max. Ranges from 4 KiB to 128 MiB.
-        assert!(size_marker <= 0x0F);
-        2u32.pow(12 + size_marker as u32).into()
-    }
-
     /// Returns an empty [`Block`].
     pub const fn empty() -> Block {
         Block { data: Bytes::new() }
@@ -336,11 +314,87 @@ impl From<u32> for BlockIdIndex {
     }
 }
 
+const MAX_SIZE_MARKER: u8 = 0b1111; // 4 bits
+const MAX_BLOCK_SIZE: u32 = 2u32.pow(27); // 128 MiB
+
+// TODO: `BlockSize` and `FileSize` structs should guarantee sanity.
+//       That is, when they are mutated, validity is checked.
+//       No other mutable access is even possible, or at least via some scary escape hatch.
+
+#[derive(Eq, PartialEq, PartialOrd, Ord, Clone, Copy, Debug)]
+pub struct BlockSize(u32);
+
+impl BlockSize {
+    /// Returns the block size in number of bytes, in powers of two in the range of 4 KiB - 128 MiB.
+    ///
+    /// The minimum block size of 4 KiB was chosen because it is a very common device sector size.
+    /// This choice helps with great compatability with [Advanced Format]. It is likely to offer
+    /// better performance than smaller block sizes and less likely to get stuck in a device buffer.
+    ///
+    /// The choice of calculating powers of two is because it offers good granularity
+    /// when choosing for future optimizations while ensuring all the sizes are multiples of 4 KiB.
+    ///
+    /// The choice of using 4 bits (16 values) comes because 3 bits would get us only to 512 KiB
+    /// which is not nearly enough for 100 GB files. On the other hand 5 bits would get us all the
+    /// way up to 8 TiB. That block size is prohibitively large for embedded and mobile use.
+    /// Luckily 4 bits gets us to 128 MiB which is quite good for 100 GB files while still being
+    /// managable by embedded and mobile devices.
+    ///
+    /// [Advanced Format]: https://en.wikipedia.org/wiki/Advanced_Format
+    pub const fn from_marker(size_marker: u8) -> BlockSize {
+        // 4 bits max. Ranges from 4 KiB to 128 MiB.
+        assert!(size_marker <= 0x0F);
+        BlockSize(2u32.pow(12 + size_marker as u32))
+    }
+
+    pub const fn new(size: u32) -> BlockSize {
+        assert!(BlockSize::valid(size));
+        BlockSize(size)
+    }
+
+    pub const fn valid(size: u32) -> bool {
+        size.count_ones() == 1 && size << 4 > 0 && size >> 12 > 0
+    }
+
+    pub const fn as_offset(&self) -> BlockOffset {
+        BlockOffset::new(self.0)
+    }
+}
+
+impl From<u32> for BlockSize {
+    fn from(value: u32) -> Self {
+        BlockSize::new(value)
+    }
+}
+
+impl std::ops::Deref for BlockSize {
+    type Target = u32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::Sub for BlockSize {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self::Output {
+        Self(self.0.sub(other.0))
+    }
+}
+
 /// `BlockOffset` is a `u32` that refers to an offset inside a block.
 ///
 /// This means a limit of 4 GiB, which is great because max block size is 128 MiB.
 #[derive(Eq, PartialEq, PartialOrd, Ord, Clone, Copy, Debug)]
 pub struct BlockOffset(u32);
+
+impl BlockOffset {
+    pub const fn new(value: u32) -> BlockOffset {
+        assert!(value < MAX_BLOCK_SIZE);
+        BlockOffset(value)
+    }
+}
 
 impl From<u32> for BlockOffset {
     fn from(value: u32) -> Self {
@@ -364,7 +418,72 @@ impl std::ops::Sub for BlockOffset {
     }
 }
 
-pub const MAX_FILE_SIZE: FileOffset = FileOffset::new(2u64.pow(59) - 280 * 2u64.pow(27));
+pub const MAX_FILE_SIZE: u64 = 2u64.pow(59) - 280 * 2u64.pow(27);
+
+#[derive(Eq, PartialEq, PartialOrd, Ord, Clone, Copy, Debug)]
+pub struct FileSize(u64);
+
+impl FileSize {
+    pub const fn new(value: u64) -> FileSize {
+        assert!(value <= MAX_FILE_SIZE);
+        FileSize(value)
+    }
+
+    /// Converts the `FileSize` into a `BlockOffset`.
+    ///
+    /// This conversion is only safe if the `FileSize` value fits into `BlockOffset`.
+    pub fn as_block_offset(&self) -> BlockOffset {
+        (self.0 as u32).into()
+    }
+
+    pub fn as_offset(&self) -> FileOffset {
+        FileOffset::new(self.0)
+    }
+}
+
+impl std::ops::Deref for FileSize {
+    type Target = u64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<BlockSize> for FileSize {
+    fn from(value: BlockSize) -> FileSize {
+        // u32 never exceeds MAX_FILE_SIZE
+        // TODO: Add some sort of compile time assertion for this
+        Self(value.0 as u64)
+    }
+}
+
+impl From<u64> for FileSize {
+    fn from(value: u64) -> FileSize {
+        FileSize::new(value)
+    }
+}
+
+impl std::ops::Add for FileSize {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        Self(self.0.add(other.0))
+    }
+}
+
+impl std::ops::AddAssign for FileSize {
+    fn add_assign(&mut self, other: Self) {
+        self.0.add_assign(other.0)
+    }
+}
+
+impl std::ops::Sub for FileSize {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self::Output {
+        Self(self.0.sub(other.0))
+    }
+}
 
 /// `FileOffset` is a `u64` that refers to an offset inside a file.
 ///
@@ -375,15 +494,12 @@ pub struct FileOffset(u64);
 
 impl FileOffset {
     pub const fn new(value: u64) -> FileOffset {
+        assert!(value < MAX_FILE_SIZE);
         FileOffset(value)
     }
 
-    pub fn valid_offset(&self) -> bool {
-        self < &MAX_FILE_SIZE
-    }
-
-    pub fn valid_size(&self) -> bool {
-        self <= &MAX_FILE_SIZE
+    pub fn as_size(&self) -> FileSize {
+        FileSize(self.0)
     }
 
     /// Converts the `FileOffset` into a `BlockOffset`.
@@ -479,17 +595,15 @@ impl From<Block> for InfoBlock {
 impl InfoBlock {
     /// Returns the location of the offset inside a block.
     fn translate_file_offset(offset: FileOffset) -> (BlockIdIndex, BlockOffset) {
-        assert!(offset.valid_offset());
-
         // TODO: Optimize this some more. Perhaps add an immediate check for sizes in the 128 MiB section.
-        let mut total = FileOffset::from(0);
+        let mut total = FileSize::new(0);
         for size_marker in 0..16u32 {
-            let size = Block::size_from_marker(size_marker as u8);
+            let size = FileSize::from(BlockSize::from_marker(size_marker as u8));
             for j in 0..16 {
                 if size_marker > 3 && j == 15 {
                     for n in 0..(size_marker - 3) {
                         let old_total = total;
-                        total += size.into();
+                        total += size;
                         let mut xdx = size_marker * 16 + j;
                         if size_marker > 3 {
                             for ii in 4..size_marker {
@@ -497,13 +611,13 @@ impl InfoBlock {
                             }
                             xdx += n;
                         }
-                        if offset < total {
-                            return (xdx.into(), (offset - old_total).as_block_offset());
+                        if offset.as_size() < total {
+                            return (xdx.into(), (offset.as_size() - old_total).as_block_offset());
                         }
                     }
                 }
                 let old_total = total;
-                total += size.into();
+                total += size;
                 let mut xdx = size_marker * 16 + j;
                 if size_marker > 3 {
                     for ii in 4..size_marker {
@@ -513,26 +627,26 @@ impl InfoBlock {
                         xdx += size_marker - 3;
                     }
                 }
-                if offset < total {
-                    return (xdx.into(), (offset - old_total).as_block_offset());
+                if offset.as_size() < total {
+                    return (xdx.into(), (offset.as_size() - old_total).as_block_offset());
                 }
             }
         }
 
-        let size: FileOffset = Block::size_from_marker(15).into();
-        let remaining_bytes = offset - total;
-        let remaining_blocks = *(remaining_bytes / size);
-        let extra_bytes = remaining_bytes - (FileOffset::from(remaining_blocks) * size);
+        let size = *BlockSize::from_marker(15) as u64;
+        let remaining_bytes = offset.as_size() - total;
+        let remaining_blocks = *remaining_bytes / size;
+        let extra_bytes = remaining_bytes - (remaining_blocks * size).into();
 
-        let old_total = total + (FileOffset::from(remaining_blocks) * size);
-        let total = old_total + size;
+        let old_total = total + (FileSize::from(remaining_blocks * size));
+        let total = old_total + size.into();
 
         let mut xdx = 256 + remaining_blocks;
         for i in 4..16 {
             xdx += i - 3;
         }
 
-        ((xdx as u32).into(), (offset - old_total).as_block_offset())
+        ((xdx as u32).into(), (offset.as_size() - old_total).as_block_offset())
     }
 
     pub fn new_vault(root_id: BlockId, index_id: BlockId) -> Block {
@@ -885,6 +999,23 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn block_size() {
+        for size_marker in 0..MAX_SIZE_MARKER {
+            let size = *BlockSize::from_marker(size_marker);
+            assert_eq!(size, 2u32.pow(12 + size_marker as u32));
+            assert!(BlockSize::valid(size));
+            assert!(!BlockSize::valid(size - 1));
+            assert!(!BlockSize::valid(size + 1));
+        }
+        assert!(BlockSize::valid(MAX_BLOCK_SIZE));
+        assert!(!BlockSize::valid(MAX_BLOCK_SIZE - 1));
+        assert!(!BlockSize::valid(MAX_BLOCK_SIZE + 1));
+        assert!(!BlockSize::valid(2u32.pow(28)));
+        assert!(!BlockSize::valid(2u32.pow(29) + 45));
+        assert!(!BlockSize::valid(2u32.pow(30) + 123456));
+    }
+
     /// Make sure that all `BlockId` variants are properly detected.
     #[test]
     fn block_id_header() {
@@ -982,52 +1113,54 @@ mod tests {
     #[test]
     fn file_offset_translation() {
         // Start off by testing every prefix of the size strategy
-        let mut total = FileOffset::from(0);
+        let mut total = FileSize::new(0);
         let mut idx = BlockIdIndex::from(0);
         for size_marker in 0..16 {
-            let size = Block::size_from_marker(size_marker);
+            let size = BlockSize::from_marker(size_marker);
             for n in 0..16 {
                 if n == 15 && size_marker > 3 {
                     for _ in 0..(size_marker - 3) {
                         total += size.into();
                         *idx += 1;
-                        let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(total);
+                        let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(total.as_offset());
                         assert_eq!(block_id_idx, idx);
                         assert_eq!(offset_in_block, 0.into());
-                        let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(total - 1.into());
+                        let (block_id_idx, offset_in_block) =
+                            InfoBlock::translate_file_offset((total - 1.into()).as_offset());
                         assert_eq!(block_id_idx, idx - 1.into());
-                        assert_eq!(offset_in_block, size - BlockOffset::from(1));
-                        let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(total + 1.into());
+                        assert_eq!(offset_in_block, (*size - 1).into());
+                        let (block_id_idx, offset_in_block) =
+                            InfoBlock::translate_file_offset((total + 1.into()).as_offset());
                         assert_eq!(block_id_idx, idx);
                         assert_eq!(offset_in_block, 1.into());
                     }
                 }
                 total += size.into();
                 *idx += 1;
-                let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(total);
+                let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(total.as_offset());
                 assert_eq!(block_id_idx, idx);
                 assert_eq!(offset_in_block, 0.into());
-                let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(total - 1.into());
+                let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset((total - 1.into()).as_offset());
                 assert_eq!(block_id_idx, idx - 1.into());
-                assert_eq!(offset_in_block, size - BlockOffset::from(1));
-                let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(total + 1.into());
+                assert_eq!(offset_in_block, (*size - 1).into());
+                let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset((total + 1.into()).as_offset());
                 assert_eq!(block_id_idx, idx);
                 assert_eq!(offset_in_block, 1.into());
             }
         }
 
         // We try 8138 extra 128 MiB blocks on top for a total size of 1 TiB
-        let size = Block::size_from_marker(15);
+        let size = BlockSize::from_marker(15);
         for _ in 0..8138 {
             total += size.into();
             *idx += 1;
-            let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(total);
+            let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(total.as_offset());
             assert_eq!(block_id_idx, idx);
             assert_eq!(offset_in_block, 0.into());
-            let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(total - 1.into());
+            let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset((total - 1.into()).as_offset());
             assert_eq!(block_id_idx, idx - 1.into());
-            assert_eq!(offset_in_block, size - BlockOffset::from(1));
-            let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(total + 1.into());
+            assert_eq!(offset_in_block, (*size - 1).into());
+            let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset((total + 1.into()).as_offset());
             assert_eq!(block_id_idx, idx);
             assert_eq!(offset_in_block, 1.into());
         }
@@ -1046,14 +1179,14 @@ mod tests {
         assert_eq!(block_id_idx, BlockIdIndex::from(2u32.pow(31) + 280));
         assert_eq!(offset_in_block, 0.into());
 
-        let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(MAX_FILE_SIZE - 1.into());
+        let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset((MAX_FILE_SIZE - 1).into());
         assert_eq!(block_id_idx, BlockIdIndex::from(u32::MAX));
         assert_eq!(offset_in_block, (2u32.pow(27) - 1).into());
     }
 
     #[test]
-    #[should_panic = "assertion failed: offset.valid_offset()"]
+    #[should_panic = "assertion failed: value < MAX_FILE_SIZE"]
     fn file_offset_translation_too_large_offset() {
-        InfoBlock::translate_file_offset(MAX_FILE_SIZE);
+        InfoBlock::translate_file_offset(MAX_FILE_SIZE.into());
     }
 }
