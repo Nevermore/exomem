@@ -73,7 +73,7 @@ impl BlockId {
     // TODO: Write tests for this at every size
     fn set_header(&mut self, size: usize, has_header: bool) {
         let size_marker = 12 - size.ilog2() as u8;
-        if size_marker > 15 {
+        if size_marker > MAX_SIZE_MARKER {
             panic!("Unexpected size marker");
         }
         let mut header = 0;
@@ -343,7 +343,7 @@ impl BlockSize {
     /// [Advanced Format]: https://en.wikipedia.org/wiki/Advanced_Format
     pub const fn from_marker(size_marker: u8) -> BlockSize {
         // 4 bits max. Ranges from 4 KiB to 128 MiB.
-        assert!(size_marker <= 0x0F);
+        assert!(size_marker <= MAX_SIZE_MARKER);
         BlockSize(2u32.pow(12 + size_marker as u32))
     }
 
@@ -618,8 +618,7 @@ impl InfoBlock {
         if offset < REPEATING_BLOCKS_START_OFFSET {
             // OPTIMIZE: More can be pre-calculated, fewer loops and branches.
             let mut block_start_offset = FileOffset::new(0);
-            // There are 16 different block sizes.
-            for size_marker in 0..16u32 {
+            for size_marker in 0..=MAX_SIZE_MARKER as u32 {
                 let block_size = BlockSize::from_marker(size_marker as u8);
                 // Every block size gets at least 16 repetitions.
                 for j in 0..16 {
@@ -661,7 +660,7 @@ impl InfoBlock {
             unreachable!();
         }
 
-        let repeating_block_size = *BlockSize::from_marker(15) as u64;
+        let repeating_block_size = *BlockSize::from_marker(MAX_SIZE_MARKER) as u64;
         let remaining_bytes = offset - REPEATING_BLOCKS_START_OFFSET;
         let remaining_blocks = *remaining_bytes / repeating_block_size;
         let remaining_blocks_size = FileSize::from(remaining_blocks * repeating_block_size);
@@ -1059,7 +1058,7 @@ mod tests {
         for unused_bit_a in 0..=1 {
             for unused_bit_b in 0..=1 {
                 for header in 0..=1 {
-                    for size_marker in 0..=0x0F {
+                    for size_marker in 0..=MAX_SIZE_MARKER {
                         id_bytes[0] = 0b0000_0000;
                         if unused_bit_a == 1 {
                             id_bytes[0] |= 0b1000_0000;
@@ -1147,7 +1146,7 @@ mod tests {
         // Test every prefix of the size strategy
         let mut total = FileSize::new(0);
         let mut idx = BlockIdIndex::from(0);
-        for size_marker in 0..16 {
+        for size_marker in 0..=MAX_SIZE_MARKER {
             let size = BlockSize::from_marker(size_marker);
             for n in 0..16 {
                 if n == 15 && size_marker > 3 {
@@ -1182,7 +1181,7 @@ mod tests {
         }
 
         // We try 8138 extra 128 MiB blocks on top for a total size of 1 TiB
-        let size = BlockSize::from_marker(15);
+        let size = BlockSize::from_marker(MAX_SIZE_MARKER);
         for _ in 0..8138 {
             total += size.into();
             *idx += 1;
