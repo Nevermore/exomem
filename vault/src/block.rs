@@ -356,6 +356,7 @@ impl BlockSize {
         size.count_ones() == 1 && size << 4 > 0 && size >> 12 > 0
     }
 
+    /// Can panic!
     pub const fn as_offset(&self) -> BlockOffset {
         BlockOffset::new(self.0)
     }
@@ -398,13 +399,14 @@ impl BlockOffset {
 
 impl From<u32> for BlockOffset {
     fn from(value: u32) -> Self {
-        Self(value)
+        Self::new(value)
     }
 }
 
 impl std::ops::Add for BlockOffset {
     type Output = Self;
 
+    // TODO: Check for validity?
     fn add(self, other: Self) -> Self::Output {
         Self(self.0.add(other.0))
     }
@@ -413,6 +415,7 @@ impl std::ops::Add for BlockOffset {
 impl std::ops::Sub for BlockOffset {
     type Output = Self;
 
+    // TODO: Check for sanity?
     fn sub(self, other: Self) -> Self::Output {
         Self(self.0.sub(other.0))
     }
@@ -436,6 +439,7 @@ impl FileSize {
         (self.0 as u32).into()
     }
 
+    /// Can panic!
     pub fn as_offset(&self) -> FileOffset {
         FileOffset::new(self.0)
     }
@@ -463,6 +467,7 @@ impl From<u64> for FileSize {
     }
 }
 
+// TODO: Ensure sanity for Add/AddAssign/Sub?
 impl std::ops::Add for FileSize {
     type Output = Self;
 
@@ -508,11 +513,6 @@ impl FileOffset {
     pub fn as_block_offset(&self) -> BlockOffset {
         (self.0 as u32).into()
     }
-
-    /// Converts the `FileOffset` into a `u64`.
-    pub fn as_u64(&self) -> u64 {
-        self.0
-    }
 }
 
 impl std::ops::Deref for FileOffset {
@@ -523,21 +523,31 @@ impl std::ops::Deref for FileOffset {
     }
 }
 
-impl std::ops::AddAssign for FileOffset {
-    fn add_assign(&mut self, other: Self) {
-        self.0.add_assign(other.0)
+impl From<BlockOffset> for FileOffset {
+    fn from(value: BlockOffset) -> Self {
+        // u32 can't be larger than MAX_FILE_SIZE
+        // TODO: Add compile time check for this
+        FileOffset(value.0 as u64)
     }
 }
 
-impl From<BlockOffset> for FileOffset {
-    fn from(value: BlockOffset) -> Self {
-        Self::new(value.0 as u64)
+impl From<BlockSize> for FileOffset {
+    fn from(value: BlockSize) -> Self {
+        // u32 can't be larger than MAX_FILE_SIZE
+        // TODO: Add compile time check for this
+        FileOffset(value.0 as u64)
     }
 }
 
 impl From<u64> for FileOffset {
     fn from(value: u64) -> Self {
         Self::new(value)
+    }
+}
+
+impl std::ops::AddAssign for FileOffset {
+    fn add_assign(&mut self, other: Self) {
+        self.0.add_assign(other.0)
     }
 }
 
@@ -592,61 +602,73 @@ impl From<Block> for InfoBlock {
     }
 }
 
+/// The [`FileOffset`] immediately after the deterministic sequence of variable sized blocks.
+///
+/// This value is 6.75 GiB.
+const REPEATING_BLOCKS_START_OFFSET: FileOffset = FileOffset::new(7_247_757_312);
+
 impl InfoBlock {
     /// Returns the location of the offset inside a block.
+    ///
+    /// Every file starts with a deterministic sequence of variable sized blocks.
+    /// This sequence is [`REPEATING_BLOCKS_START_OFFSET`] bytes long (6.75 GiB).
+    /// After the initial sequence every block is maximum sized at 128 MiB.
+    /// With the exception of the very last block which can be of any size that fits the data.
     fn translate_file_offset(offset: FileOffset) -> (BlockIdIndex, BlockOffset) {
-        // TODO: Optimize this some more. Perhaps add an immediate check for sizes in the 128 MiB section.
-        let mut total = FileSize::new(0);
-        for size_marker in 0..16u32 {
-            let size = FileSize::from(BlockSize::from_marker(size_marker as u8));
-            for j in 0..16 {
-                if size_marker > 3 && j == 15 {
-                    for n in 0..(size_marker - 3) {
-                        let old_total = total;
-                        total += size;
-                        let mut xdx = size_marker * 16 + j;
-                        if size_marker > 3 {
-                            for ii in 4..size_marker {
-                                xdx += ii - 3;
+        if offset < REPEATING_BLOCKS_START_OFFSET {
+            // OPTIMIZE: More can be pre-calculated, fewer loops and branches.
+            let mut block_start_offset = FileOffset::new(0);
+            // There are 16 different block sizes.
+            for size_marker in 0..16u32 {
+                let block_size = BlockSize::from_marker(size_marker as u8);
+                // Every block size gets at least 16 repetitions.
+                for j in 0..16 {
+                    // Blocks starting from 64 KiB require even more repetitions to keep alignment.
+                    if size_marker > 3 && j == 15 {
+                        // A 64 KiB block requires one extra repetition.
+                        // Every subsequently larger block size adds an extra repetition.
+                        for n in 0..(size_marker - 3) {
+                            let old_block_offset = block_start_offset;
+                            block_start_offset += block_size.into();
+                            let mut block_index = size_marker * 16 + j;
+                            if size_marker > 3 {
+                                for ii in 4..size_marker {
+                                    block_index += ii - 3;
+                                }
+                                block_index += n;
                             }
-                            xdx += n;
+                            if offset < block_start_offset {
+                                return (block_index.into(), (offset - old_block_offset).as_block_offset());
+                            }
                         }
-                        if offset.as_size() < total {
-                            return (xdx.into(), (offset.as_size() - old_total).as_block_offset());
+                    }
+                    let old_block_offset = block_start_offset;
+                    block_start_offset += block_size.into();
+                    let mut block_index = size_marker * 16 + j;
+                    if size_marker > 3 {
+                        for ii in 4..size_marker {
+                            block_index += ii - 3;
+                        }
+                        if j == 15 {
+                            block_index += size_marker - 3;
                         }
                     }
-                }
-                let old_total = total;
-                total += size;
-                let mut xdx = size_marker * 16 + j;
-                if size_marker > 3 {
-                    for ii in 4..size_marker {
-                        xdx += ii - 3;
+                    if offset < block_start_offset {
+                        return (block_index.into(), (offset - old_block_offset).as_block_offset());
                     }
-                    if j == 15 {
-                        xdx += size_marker - 3;
-                    }
-                }
-                if offset.as_size() < total {
-                    return (xdx.into(), (offset.as_size() - old_total).as_block_offset());
                 }
             }
+            unreachable!();
         }
 
-        let size = *BlockSize::from_marker(15) as u64;
-        let remaining_bytes = offset.as_size() - total;
-        let remaining_blocks = *remaining_bytes / size;
-        let extra_bytes = remaining_bytes - (remaining_blocks * size).into();
+        let repeating_block_size = *BlockSize::from_marker(15) as u64;
+        let remaining_bytes = offset - REPEATING_BLOCKS_START_OFFSET;
+        let remaining_blocks = *remaining_bytes / repeating_block_size;
+        let remaining_blocks_size = FileSize::from(remaining_blocks * repeating_block_size);
+        let last_block_start_offset = REPEATING_BLOCKS_START_OFFSET + remaining_blocks_size.as_offset();
+        let block_index = (334 + remaining_blocks as u32).into();
 
-        let old_total = total + (FileSize::from(remaining_blocks * size));
-        let total = old_total + size.into();
-
-        let mut xdx = 256 + remaining_blocks;
-        for i in 4..16 {
-            xdx += i - 3;
-        }
-
-        ((xdx as u32).into(), (offset.as_size() - old_total).as_block_offset())
+        (block_index, (offset - last_block_start_offset).as_block_offset())
     }
 
     pub fn new_vault(root_id: BlockId, index_id: BlockId) -> Block {
@@ -1112,7 +1134,17 @@ mod tests {
 
     #[test]
     fn file_offset_translation() {
-        // Start off by testing every prefix of the size strategy
+        // A very simple single block case
+        let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(4000.into());
+        assert_eq!(block_id_idx, 0.into());
+        assert_eq!(offset_in_block, 4000.into());
+
+        // Simple two block case
+        let (block_id_idx, offset_in_block) = InfoBlock::translate_file_offset(7000.into());
+        assert_eq!(block_id_idx, 1.into());
+        assert_eq!(offset_in_block, 2904.into());
+
+        // Test every prefix of the size strategy
         let mut total = FileSize::new(0);
         let mut idx = BlockIdIndex::from(0);
         for size_marker in 0..16 {
