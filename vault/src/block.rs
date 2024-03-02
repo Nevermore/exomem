@@ -1006,7 +1006,7 @@ impl InfoBlock {
                 union_id::Which::ShardId(_) => unimplemented!(),
             };
 
-            let name = entry_r.get_name().unwrap();
+            let name = entry_r.get_name().unwrap().to_str().unwrap();
             result.push((kind, name));
         }
 
