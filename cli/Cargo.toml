@@ -6,7 +6,7 @@ publish = false
 license = "AGPL-3.0-or-later"
 
 [dependencies]
-clap = { version = "4.1.4", features = [ "derive" ] }
+clap = { version = "4.5.1", features = [ "derive" ] }
 
 ui = { package = "exomem-ui", path = "../ui" }
 vault = { package = "exomem-vault", path = "../vault" }

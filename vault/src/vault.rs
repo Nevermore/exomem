@@ -106,6 +106,7 @@ impl<'a> Vault<'a> {
     }
 
     pub fn put(&mut self, name: &str) -> Result<&File, io::Error> {
+        // TODO: Implement basic file importing.
         /*
         let p = Path::new(name);
         let f = File::from_os(p)?;
